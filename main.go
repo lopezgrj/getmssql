@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	_ "github.com/mattn/go-sqlite3"
+
 	_ "github.com/denisenkom/go-mssqldb"
 	"github.com/joho/godotenv"
 )
@@ -68,10 +70,29 @@ func main() {
 			return
 		}
 		var fieldsFile string
+		var asCSV, asTSV, asSQLite bool
 		if len(os.Args) >= 4 {
-			fieldsFile = os.Args[3]
+			lastArg := os.Args[len(os.Args)-1]
+			if lastArg == "csv" {
+				asCSV = true
+				if len(os.Args) >= 5 {
+					fieldsFile = os.Args[3]
+				}
+			} else if lastArg == "tsv" {
+				asTSV = true
+				if len(os.Args) >= 5 {
+					fieldsFile = os.Args[3]
+				}
+			} else if lastArg == "sqlite3" {
+				asSQLite = true
+				if len(os.Args) >= 5 {
+					fieldsFile = os.Args[3]
+				}
+			} else {
+				fieldsFile = os.Args[3]
+			}
 		}
-		downloadTableJSON(db, os.Args[2], fieldsFile)
+		downloadTable(db, os.Args[2], fieldsFile, asTSV, asCSV, asSQLite)
 		return
 	default:
 		fmt.Printf("Unknown command: %s\n", os.Args[1])
@@ -150,7 +171,9 @@ func listFields(db *sql.DB, table string) {
 // downloadTableJSON downloads all rows from a specified table and saves them as a JSON file
 // The file is named after the table in lowercase with a .json extension
 // Example: If the table is named "Users", the file will be named "users.json
-func downloadTableJSON(db *sql.DB, table string, fieldsFile string) {
+
+// downloadTable downloads all rows from a specified table and saves them as a JSON, TSV, CSV, or SQLite3 table
+func downloadTable(db *sql.DB, table string, fieldsFile string, asTSV, asCSV, asSQLite bool) {
 	start := time.Now()
 	var query string
 	var fields []string
@@ -188,15 +211,142 @@ func downloadTableJSON(db *sql.DB, table string, fieldsFile string) {
 		log.Fatalf("Error getting columns: %v", err)
 	}
 
-	filename := fmt.Sprintf("%s.json", strings.ToLower(table))
+	if asSQLite {
+		dbFile := "output.sqlite3"
+		sqliteDB, err := sql.Open("sqlite3", dbFile)
+		if err != nil {
+			log.Fatalf("Error opening SQLite3 database: %v", err)
+		}
+		defer sqliteDB.Close()
+
+		// Check if table exists
+		var tableExists int
+		err = sqliteDB.QueryRow(fmt.Sprintf("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='%s'", table)).Scan(&tableExists)
+		if err != nil {
+			log.Fatalf("Error checking if table exists in SQLite3: %v", err)
+		}
+		if tableExists > 0 {
+			fmt.Printf("Table '%s' already exists in %s. Delete and recreate? (y/N): ", table, dbFile)
+			var response string
+			fmt.Scanln(&response)
+			if strings.ToLower(strings.TrimSpace(response)) == "y" {
+				dropStmt := fmt.Sprintf("DROP TABLE IF EXISTS [%s]", table)
+				if _, err := sqliteDB.Exec(dropStmt); err != nil {
+					log.Fatalf("Error dropping table in SQLite3: %v", err)
+				}
+				fmt.Printf("Table '%s' dropped.\n", table)
+			} else {
+				fmt.Println("Aborted by user.")
+				return
+			}
+		}
+
+		// Create table
+		colDefs := make([]string, len(cols))
+		for i, col := range cols {
+			colDefs[i] = fmt.Sprintf("[%s] TEXT", col)
+		}
+		createStmt := fmt.Sprintf("CREATE TABLE IF NOT EXISTS [%s] (%s)", table, strings.Join(colDefs, ", "))
+		if _, err := sqliteDB.Exec(createStmt); err != nil {
+			log.Fatalf("Error creating table in SQLite3: %v", err)
+		}
+		insertStmt := fmt.Sprintf("INSERT INTO [%s] (%s) VALUES (%s)", table, strings.Join(cols, ", "), strings.TrimRight(strings.Repeat("?,", len(cols)), ","))
+		batchSize := 10000
+		rowCount := 0
+		tx, err := sqliteDB.Begin()
+		if err != nil {
+			log.Fatalf("Error starting SQLite3 transaction: %v", err)
+		}
+		stmt, err := tx.Prepare(insertStmt)
+		if err != nil {
+			log.Fatalf("Error preparing SQLite3 statement: %v", err)
+		}
+		defer stmt.Close()
+		for rows.Next() {
+			columns := make([]interface{}, len(cols))
+			columnPointers := make([]interface{}, len(cols))
+			for i := range columns {
+				columnPointers[i] = &columns[i]
+			}
+			if err := rows.Scan(columnPointers...); err != nil {
+				log.Fatalf("Error scanning row: %v", err)
+			}
+			vals := make([]interface{}, len(cols))
+			for i := range cols {
+				val := columnPointers[i].(*interface{})
+				v := *val
+				switch t := v.(type) {
+				case time.Time:
+					vals[i] = t.Format("2006-01-02")
+				case []uint8:
+					s := string(t)
+					if intVal, err := strconv.ParseInt(s, 10, 64); err == nil {
+						vals[i] = intVal
+					} else if floatVal, err := strconv.ParseFloat(s, 64); err == nil {
+						vals[i] = floatVal
+					} else {
+						vals[i] = s
+					}
+				default:
+					vals[i] = v
+				}
+			}
+			if _, err := stmt.Exec(vals...); err != nil {
+				log.Fatalf("Error inserting row into SQLite3: %v", err)
+			}
+			rowCount++
+			if rowCount%batchSize == 0 {
+				if err := tx.Commit(); err != nil {
+					log.Fatalf("Error committing SQLite3 transaction: %v", err)
+				}
+				tx, err = sqliteDB.Begin()
+				if err != nil {
+					log.Fatalf("Error starting SQLite3 transaction: %v", err)
+				}
+				stmt, err = tx.Prepare(insertStmt)
+				if err != nil {
+					log.Fatalf("Error preparing SQLite3 statement: %v", err)
+				}
+				fmt.Printf("\rDownloaded %d rows...", rowCount)
+			} else if rowCount%1000 == 0 {
+				fmt.Printf("\rDownloaded %d rows...", rowCount)
+			}
+		}
+		if err := rows.Err(); err != nil {
+			log.Fatalf("Row error: %v", err)
+		}
+		if err := tx.Commit(); err != nil {
+			log.Fatalf("Error committing SQLite3 transaction: %v", err)
+		}
+		fmt.Printf("\rTotal rows downloaded: %d\n", rowCount)
+		elapsed := time.Since(start)
+		fmt.Printf("Table '%s' data written to %s (table: %s) in %s\n", table, dbFile, table, elapsed)
+		return
+	}
+	var filename string
+	if asCSV {
+		filename = fmt.Sprintf("%s.csv", strings.ToLower(table))
+	} else if asTSV {
+		filename = fmt.Sprintf("%s.tsv", strings.ToLower(table))
+	} else {
+		filename = fmt.Sprintf("%s.json", strings.ToLower(table))
+	}
 	file, err := os.Create(filename)
 	if err != nil {
-		log.Fatalf("Error creating JSON file: %v", err)
+		log.Fatalf("Error creating output file: %v", err)
 	}
 	defer file.Close()
 
-	file.WriteString("[")
 	rowCount := 0
+	if asCSV {
+		// Write header
+		file.WriteString(strings.Join(cols, "||") + "\n")
+	} else if asTSV {
+		// Write header
+		file.WriteString(strings.Join(cols, "\t") + "\n")
+	} else {
+		file.WriteString("[")
+	}
 	first := true
 	for rows.Next() {
 		columns := make([]interface{}, len(cols))
@@ -227,15 +377,47 @@ func downloadTableJSON(db *sql.DB, table string, fieldsFile string) {
 				rowMap[colName] = v
 			}
 		}
-		if !first {
-			file.WriteString(",\n")
+		if asCSV {
+			// Write CSV row with || separator
+			var rowVals []string
+			for _, colName := range cols {
+				val := rowMap[colName]
+				switch v := val.(type) {
+				case nil:
+					rowVals = append(rowVals, "")
+				case string:
+					rowVals = append(rowVals, v)
+				default:
+					rowVals = append(rowVals, fmt.Sprint(v))
+				}
+			}
+			file.WriteString(strings.Join(rowVals, "||") + "\n")
+		} else if asTSV {
+			// Write TSV row
+			var rowVals []string
+			for _, colName := range cols {
+				val := rowMap[colName]
+				switch v := val.(type) {
+				case nil:
+					rowVals = append(rowVals, "")
+				case string:
+					rowVals = append(rowVals, v)
+				default:
+					rowVals = append(rowVals, fmt.Sprint(v))
+				}
+			}
+			file.WriteString(strings.Join(rowVals, "\t") + "\n")
+		} else {
+			if !first {
+				file.WriteString(",\n")
+			}
+			first = false
+			encBuf, err := json.MarshalIndent(rowMap, "  ", "  ")
+			if err != nil {
+				log.Fatalf("Error marshaling row: %v", err)
+			}
+			file.Write(encBuf)
 		}
-		first = false
-		encBuf, err := json.MarshalIndent(rowMap, "  ", "  ")
-		if err != nil {
-			log.Fatalf("Error marshaling row: %v", err)
-		}
-		file.Write(encBuf)
 		rowCount++
 		if rowCount%1000 == 0 {
 			fmt.Printf("\rDownloaded %d rows...", rowCount)
@@ -244,8 +426,12 @@ func downloadTableJSON(db *sql.DB, table string, fieldsFile string) {
 	if err := rows.Err(); err != nil {
 		log.Fatalf("Row error: %v", err)
 	}
-	file.WriteString("]\n")
-	fmt.Printf("\rTotal rows downloaded: %d\n", rowCount)
+	if asCSV || asTSV {
+		fmt.Printf("\rTotal rows downloaded: %d\n", rowCount)
+	} else {
+		file.WriteString("]\n")
+		fmt.Printf("\rTotal rows downloaded: %d\n", rowCount)
+	}
 
 	elapsed := time.Since(start)
 	fmt.Printf("Table '%s' data written to %s in %s\n", table, filename, elapsed)
