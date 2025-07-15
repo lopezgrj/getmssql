@@ -1,10 +1,10 @@
 package main
-
 import (
 	"os"
 	"strings"
 	"testing"
 	"time"
+	"io"
 
 	"getmssql/dbexport"
 
@@ -108,3 +108,119 @@ func TestScanRowValuesAndMap(t *testing.T) {
 }
 
 // Integration tests for writeDuckDB, writeSQLite, writeFileOutput would require a test database and are best tested with mocks or skipped in unit tests.
+
+func TestCLI_HelpFlag(t *testing.T) {
+	// Save and restore os.Args and os.Stdout
+	origArgs := os.Args
+	origStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	os.Args = []string{"getmssql", "-h"}
+
+	defer func() {
+		os.Args = origArgs
+		os.Stdout = origStdout
+	}()
+
+	// main() should call usage and exit, so recover panic
+	defer func() {
+		_ = recover()
+	}()
+
+	main()
+	w.Close()
+	out, _ := io.ReadAll(r)
+	if !strings.Contains(string(out), "Usage:") {
+		t.Errorf("expected usage output, got: %s", string(out))
+	}
+}
+
+func TestCLI_MissingEnvVars(t *testing.T) {
+	   // Save and restore os.Environ and os.Args
+	   origEnv := os.Environ()
+	   origArgs := os.Args
+	   rErr, wErr, _ := os.Pipe()
+	   rOut, wOut, _ := os.Pipe()
+	   origStderr := os.Stderr
+	   origStdout := os.Stdout
+	   os.Stderr = wErr
+	   os.Stdout = wOut
+
+	   for _, k := range []string{"MSSQL_SERVER", "MSSQL_USER", "MSSQL_PASSWORD", "MSSQL_DATABASE"} {
+			   _ = os.Unsetenv(k)
+	   }
+	   os.Args = []string{"getmssql", "-table", "foo"}
+
+	   defer func() {
+			   for _, kv := range origEnv {
+					   parts := strings.SplitN(kv, "=", 2)
+					   if len(parts) == 2 {
+							   _ = os.Setenv(parts[0], parts[1])
+					   }
+			   }
+			   os.Args = origArgs
+			   os.Stderr = origStderr
+			   os.Stdout = origStdout
+	   }()
+
+	   // main() should log.Fatalf and exit, so recover panic
+	   defer func() {
+			   _ = recover()
+	   }()
+
+	   main()
+	   // Give the logger a moment to flush output
+	   time.Sleep(10 * time.Millisecond)
+	   _ = wErr.Sync()
+	   _ = wOut.Sync()
+	   wErr.Close()
+	   wOut.Close()
+	   errOut, _ := io.ReadAll(rErr)
+	   stdOut, _ := io.ReadAll(rOut)
+	   os.Stderr = origStderr
+	   os.Stdout = origStdout
+	   outStr := string(errOut) + string(stdOut)
+	   if !strings.Contains(outStr, "missing required environment variable") && !strings.Contains(outStr, "Unknown command:") {
+			   t.Errorf("expected missing env var error, got: %s", outStr)
+	   }
+}
+
+func TestCLI_InvalidFlag(t *testing.T) {
+	   origArgs := os.Args
+	   rErr, wErr, _ := os.Pipe()
+	   rOut, wOut, _ := os.Pipe()
+	   origStderr := os.Stderr
+	   origStdout := os.Stdout
+	   os.Stderr = wErr
+	   os.Stdout = wOut
+
+	   os.Args = []string{"getmssql", "-notaflag"}
+
+	   defer func() {
+			   os.Args = origArgs
+			   os.Stderr = origStderr
+			   os.Stdout = origStdout
+	   }()
+
+	   // main() should print flag error and exit, so recover panic
+	   defer func() {
+			   _ = recover()
+	   }()
+
+	   main()
+	   // Give the flag package a moment to flush output
+	   time.Sleep(10 * time.Millisecond)
+	   _ = wErr.Sync()
+	   _ = wOut.Sync()
+	   wErr.Close()
+	   wOut.Close()
+	   errOut, _ := io.ReadAll(rErr)
+	   stdOut, _ := io.ReadAll(rOut)
+	   os.Stderr = origStderr
+	   os.Stdout = origStdout
+	   outStr := string(errOut) + string(stdOut)
+	   if !strings.Contains(outStr, "flag provided but not defined") && !strings.Contains(outStr, "unknown flag") && !strings.Contains(outStr, "Unknown command:") {
+			   t.Errorf("expected flag error, got: %s", outStr)
+	   }
+}

@@ -1,14 +1,41 @@
+// getmssql is a CLI tool for exporting data from a Microsoft SQL Server database.
+//
+// Usage:
+//
+//	go run main.go tables
+//	  List all tables in the database
+//	go run main.go fields <table_name>
+//	  List all fields in the specified table
+//	go run main.go download [--fields <fields_file>] [--format <format>] <table_name>
+//	  Export data from the specified table. Format can be: json, tsv, csv, sqlite3, duckdb (default: json)
+//
+// Prerequisites:
+//   - Set the following environment variables (or use a .env file):
+//     MSSQL_SERVER, MSSQL_PORT, MSSQL_USER, MSSQL_PASSWORD, MSSQL_DATABASE
+//   - Optionally, provide a file with a list of fields for export.
+//
+// Example .env file:
+//
+//	MSSQL_SERVER=localhost
+//	MSSQL_PORT=1433
+//	MSSQL_USER=sa
+//	MSSQL_PASSWORD=your_password
+//	MSSQL_DATABASE=your_db
 package main
 
 import (
+	// Standard library
 	"database/sql"
 	"flag"
 	"fmt"
-	dbexport "getmssql/dbexport"
 	"log"
 	"os"
 	"strings"
 
+	// Internal
+	dbexport "getmssql/dbexport"
+
+	// Third-party
 	_ "github.com/denisenkom/go-mssqldb"
 	"github.com/joho/godotenv"
 	_ "github.com/marcboeker/go-duckdb"
@@ -52,7 +79,7 @@ func parseDownload(args []string) (table, fieldsFile, format string, err error) 
 
 // showUsage prints the usage instructions for the application
 func showUsage() {
-	fmt.Println(`Usage:
+	fmt.Print(`Usage:
 	  go run main.go tables
 		List all tables in the database
 	  go run main.go fields <table_name>
