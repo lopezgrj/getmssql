@@ -7,7 +7,8 @@ import (
 	"log"
 	"os"
 	"strings"
-	"time"
+	   "time"
+	   "strconv"
 
 	_ "github.com/denisenkom/go-mssqldb"
 	"github.com/joho/godotenv"
@@ -199,16 +200,27 @@ func downloadTableJSON(db *sql.DB, table string, fieldsFile string) {
 			log.Fatalf("Error scanning row: %v", err)
 		}
 		rowMap := make(map[string]interface{})
-		for i, colName := range cols {
-			val := columnPointers[i].(*interface{})
-			v := *val
-			switch t := v.(type) {
-			case time.Time:
-				rowMap[colName] = t.Format("2006-01-02")
-			default:
-				rowMap[colName] = v
-			}
-		}
+			   for i, colName := range cols {
+					   val := columnPointers[i].(*interface{})
+					   v := *val
+					   switch t := v.(type) {
+					   case time.Time:
+							   rowMap[colName] = t.Format("2006-01-02")
+					   case []uint8:
+							   // Try to convert to string, then to int or float if possible
+							   s := string(t)
+							   // Try int
+							   if intVal, err := strconv.ParseInt(s, 10, 64); err == nil {
+									   rowMap[colName] = intVal
+							   } else if floatVal, err := strconv.ParseFloat(s, 64); err == nil {
+									   rowMap[colName] = floatVal
+							   } else {
+									   rowMap[colName] = s
+							   }
+					   default:
+							   rowMap[colName] = v
+					   }
+			   }
 		results = append(results, rowMap)
 		rowCount++
 		if rowCount%1000 == 0 {
