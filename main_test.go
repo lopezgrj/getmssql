@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"getmssql/dbexport"
 	"getmssql/cli"
+	"getmssql/dbexport"
 
 	"github.com/DATA-DOG/go-sqlmock"
 )

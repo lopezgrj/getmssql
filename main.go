@@ -11,8 +11,8 @@
 package main
 
 import (
-	"os"
 	"getmssql/cli"
+	"os"
 
 	_ "github.com/denisenkom/go-mssqldb"
 	_ "github.com/marcboeker/go-duckdb"
