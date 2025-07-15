@@ -146,6 +146,7 @@ func downloadTableJSON(db *sql.DB, table string) {
 	}
 
 	var results []map[string]interface{}
+	rowCount := 0
 	for rows.Next() {
 		columns := make([]interface{}, len(cols))
 		columnPointers := make([]interface{}, len(cols))
@@ -161,10 +162,15 @@ func downloadTableJSON(db *sql.DB, table string) {
 			rowMap[colName] = *val
 		}
 		results = append(results, rowMap)
+		rowCount++
+		if rowCount%1000 == 0 {
+			fmt.Printf("\rDownloaded %d rows...", rowCount)
+		}
 	}
 	if err := rows.Err(); err != nil {
 		log.Fatalf("Row error: %v", err)
 	}
+	fmt.Printf("\rTotal rows downloaded: %d\n", rowCount)
 
 	fmt.Printf("Writing data to JSON file...\n")
 	jsonData, err := json.MarshalIndent(results, "", "  ")
