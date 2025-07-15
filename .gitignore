@@ -35,3 +35,4 @@ Thumbs.db
 *.tsv
 *.csv
 *.sqlite3
+*.duckdb
