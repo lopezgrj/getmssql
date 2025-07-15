@@ -5,8 +5,10 @@ go 1.24
 toolchain go1.24.5
 
 require (
+	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/denisenkom/go-mssqldb v0.12.3
 	github.com/joho/godotenv v1.5.1
+	github.com/marcboeker/go-duckdb v1.8.5
 	github.com/mattn/go-sqlite3 v1.14.28
 )
 
@@ -20,7 +22,6 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/klauspost/compress v1.17.11 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.9 // indirect
-	github.com/marcboeker/go-duckdb v1.8.5 // indirect
 	github.com/pierrec/lz4/v4 v4.1.22 // indirect
 	github.com/zeebo/xxh3 v1.0.2 // indirect
 	golang.org/x/crypto v0.40.0 // indirect
