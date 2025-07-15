@@ -1,6 +1,3 @@
-// listTables prints all table names in the connected MSSQL database
-// listFields prints all columns for a given table in the connected MSSQL database
-
 package main
 
 import (
@@ -108,6 +105,21 @@ func listTables(db *sql.DB) {
 }
 
 // listFields prints all columns for a given table in the connected MSSQL database
+// It shows the column name, data type, and whether it is nullable
+// Example usage: go run main.go fields Users
+// This will print all fields in the "Users" table
+// Output format: Column Name, Type, Nullable
+// Example output:
+// Column Name    Type        Nullable
+// id             int         NO
+// name           varchar     YES
+// created_at     datetime    NO
+// updated_at     datetime    YES
+// This function retrieves the column names, data types, and nullability from the INFORMATION_SCHEMA.COLUMNS view
+// It orders the results by the ordinal position of the columns in the table
+// It uses a parameterized query to prevent SQL injection
+// The table name is passed as a parameter to the query
+// The function handles errors gracefully and prints a user-friendly message if the table does not exist
 func listFields(db *sql.DB, table string) {
 	query := `SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = @p1 ORDER BY ORDINAL_POSITION`
 	rows, err := db.Query(query, table)
@@ -130,6 +142,9 @@ func listFields(db *sql.DB, table string) {
 	}
 }
 
+// downloadTableJSON downloads all rows from a specified table and saves them as a JSON file
+// The file is named after the table in lowercase with a .json extension
+// Example: If the table is named "Users", the file will be named "users.json
 func downloadTableJSON(db *sql.DB, table string) {
 	start := time.Now()
 	fmt.Printf("Starting download of table '%s'...\n", table)
