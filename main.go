@@ -273,6 +273,7 @@ func downloadTable(db *sql.DB, table string, fieldsFile string, asTSV, asCSV, as
 
 	if asDuckDB {
 		dbFile := "output.duckdb"
+		tableLower := strings.ToLower(table)
 		duckdb, err := sql.Open("duckdb", dbFile)
 		if err != nil {
 			log.Fatalf("Error opening DuckDB database: %v", err)
@@ -281,20 +282,20 @@ func downloadTable(db *sql.DB, table string, fieldsFile string, asTSV, asCSV, as
 
 		// Check if table exists
 		var tableExists int
-		err = duckdb.QueryRow(fmt.Sprintf("SELECT count(*) FROM information_schema.tables WHERE table_name='%s'", table)).Scan(&tableExists)
+		err = duckdb.QueryRow(fmt.Sprintf("SELECT count(*) FROM information_schema.tables WHERE table_name='%s'", tableLower)).Scan(&tableExists)
 		if err != nil {
 			log.Fatalf("Error checking if table exists in DuckDB: %v", err)
 		}
 		if tableExists > 0 {
-			fmt.Printf("Table '%s' already exists in %s. Delete and recreate? (y/N): ", table, dbFile)
+			fmt.Printf("Table '%s' already exists in %s. Delete and recreate? (y/N): ", tableLower, dbFile)
 			var response string
 			fmt.Scanln(&response)
 			if strings.ToLower(strings.TrimSpace(response)) == "y" {
-				dropStmt := fmt.Sprintf("DROP TABLE IF EXISTS [%s]", table)
+				dropStmt := fmt.Sprintf("DROP TABLE IF EXISTS \"%s\"", tableLower)
 				if _, err := duckdb.Exec(dropStmt); err != nil {
 					log.Fatalf("Error dropping table in DuckDB: %v", err)
 				}
-				fmt.Printf("Table '%s' dropped.\n", table)
+				fmt.Printf("Table '%s' dropped.\n", tableLower)
 			} else {
 				fmt.Println("Aborted by user.")
 				return
@@ -306,7 +307,7 @@ func downloadTable(db *sql.DB, table string, fieldsFile string, asTSV, asCSV, as
 		for i, col := range cols {
 			colDefs[i] = fmt.Sprintf("\"%s\" TEXT", col)
 		}
-		createStmt := fmt.Sprintf("CREATE TABLE IF NOT EXISTS \"%s\" (%s)", table, strings.Join(colDefs, ", "))
+		createStmt := fmt.Sprintf("CREATE TABLE IF NOT EXISTS \"%s\" (%s)", tableLower, strings.Join(colDefs, ", "))
 		if _, err := duckdb.Exec(createStmt); err != nil {
 			log.Fatalf("Error creating table in DuckDB: %v", err)
 		}
@@ -314,7 +315,7 @@ func downloadTable(db *sql.DB, table string, fieldsFile string, asTSV, asCSV, as
 		for i, col := range cols {
 			quotedCols[i] = fmt.Sprintf("\"%s\"", col)
 		}
-		insertStmt := fmt.Sprintf("INSERT INTO \"%s\" (%s) VALUES (%s)", table, strings.Join(quotedCols, ", "), strings.TrimRight(strings.Repeat("?,", len(cols)), ","))
+		insertStmt := fmt.Sprintf("INSERT INTO \"%s\" (%s) VALUES (%s)", tableLower, strings.Join(quotedCols, ", "), strings.TrimRight(strings.Repeat("?,", len(cols)), ","))
 		batchSize := 10000
 		rowCount := 0
 		tx, err := duckdb.Begin()
@@ -390,6 +391,7 @@ func downloadTable(db *sql.DB, table string, fieldsFile string, asTSV, asCSV, as
 
 	if asSQLite {
 		dbFile := "output.sqlite3"
+		tableLower := strings.ToLower(table)
 		sqliteDB, err := sql.Open("sqlite3", dbFile)
 		if err != nil {
 			log.Fatalf("Error opening SQLite3 database: %v", err)
@@ -398,20 +400,20 @@ func downloadTable(db *sql.DB, table string, fieldsFile string, asTSV, asCSV, as
 
 		// Check if table exists
 		var tableExists int
-		err = sqliteDB.QueryRow(fmt.Sprintf("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='%s'", table)).Scan(&tableExists)
+		err = sqliteDB.QueryRow(fmt.Sprintf("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='%s'", tableLower)).Scan(&tableExists)
 		if err != nil {
 			log.Fatalf("Error checking if table exists in SQLite3: %v", err)
 		}
 		if tableExists > 0 {
-			fmt.Printf("Table '%s' already exists in %s. Delete and recreate? (y/N): ", table, dbFile)
+			fmt.Printf("Table '%s' already exists in %s. Delete and recreate? (y/N): ", tableLower, dbFile)
 			var response string
 			fmt.Scanln(&response)
 			if strings.ToLower(strings.TrimSpace(response)) == "y" {
-				dropStmt := fmt.Sprintf("DROP TABLE IF EXISTS [%s]", table)
+				dropStmt := fmt.Sprintf("DROP TABLE IF EXISTS [%s]", tableLower)
 				if _, err := sqliteDB.Exec(dropStmt); err != nil {
 					log.Fatalf("Error dropping table in SQLite3: %v", err)
 				}
-				fmt.Printf("Table '%s' dropped.\n", table)
+				fmt.Printf("Table '%s' dropped.\n", tableLower)
 			} else {
 				fmt.Println("Aborted by user.")
 				return
@@ -423,11 +425,11 @@ func downloadTable(db *sql.DB, table string, fieldsFile string, asTSV, asCSV, as
 		for i, col := range cols {
 			colDefs[i] = fmt.Sprintf("[%s] TEXT", col)
 		}
-		createStmt := fmt.Sprintf("CREATE TABLE IF NOT EXISTS [%s] (%s)", table, strings.Join(colDefs, ", "))
+		createStmt := fmt.Sprintf("CREATE TABLE IF NOT EXISTS [%s] (%s)", tableLower, strings.Join(colDefs, ", "))
 		if _, err := sqliteDB.Exec(createStmt); err != nil {
 			log.Fatalf("Error creating table in SQLite3: %v", err)
 		}
-		insertStmt := fmt.Sprintf("INSERT INTO [%s] (%s) VALUES (%s)", table, strings.Join(cols, ", "), strings.TrimRight(strings.Repeat("?,", len(cols)), ","))
+		insertStmt := fmt.Sprintf("INSERT INTO [%s] (%s) VALUES (%s)", tableLower, strings.Join(cols, ", "), strings.TrimRight(strings.Repeat("?,", len(cols)), ","))
 		batchSize := 10000
 		rowCount := 0
 		tx, err := sqliteDB.Begin()
