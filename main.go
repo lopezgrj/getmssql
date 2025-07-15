@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"strings"
-	   "time"
-	   "strconv"
+	"time"
 
 	_ "github.com/denisenkom/go-mssqldb"
 	"github.com/joho/godotenv"
@@ -188,8 +188,16 @@ func downloadTableJSON(db *sql.DB, table string, fieldsFile string) {
 		log.Fatalf("Error getting columns: %v", err)
 	}
 
-	var results []map[string]interface{}
+	filename := fmt.Sprintf("%s.json", strings.ToLower(table))
+	file, err := os.Create(filename)
+	if err != nil {
+		log.Fatalf("Error creating JSON file: %v", err)
+	}
+	defer file.Close()
+
+	file.WriteString("[")
 	rowCount := 0
+	first := true
 	for rows.Next() {
 		columns := make([]interface{}, len(cols))
 		columnPointers := make([]interface{}, len(cols))
@@ -200,28 +208,34 @@ func downloadTableJSON(db *sql.DB, table string, fieldsFile string) {
 			log.Fatalf("Error scanning row: %v", err)
 		}
 		rowMap := make(map[string]interface{})
-			   for i, colName := range cols {
-					   val := columnPointers[i].(*interface{})
-					   v := *val
-					   switch t := v.(type) {
-					   case time.Time:
-							   rowMap[colName] = t.Format("2006-01-02")
-					   case []uint8:
-							   // Try to convert to string, then to int or float if possible
-							   s := string(t)
-							   // Try int
-							   if intVal, err := strconv.ParseInt(s, 10, 64); err == nil {
-									   rowMap[colName] = intVal
-							   } else if floatVal, err := strconv.ParseFloat(s, 64); err == nil {
-									   rowMap[colName] = floatVal
-							   } else {
-									   rowMap[colName] = s
-							   }
-					   default:
-							   rowMap[colName] = v
-					   }
-			   }
-		results = append(results, rowMap)
+		for i, colName := range cols {
+			val := columnPointers[i].(*interface{})
+			v := *val
+			switch t := v.(type) {
+			case time.Time:
+				rowMap[colName] = t.Format("2006-01-02")
+			case []uint8:
+				s := string(t)
+				if intVal, err := strconv.ParseInt(s, 10, 64); err == nil {
+					rowMap[colName] = intVal
+				} else if floatVal, err := strconv.ParseFloat(s, 64); err == nil {
+					rowMap[colName] = floatVal
+				} else {
+					rowMap[colName] = s
+				}
+			default:
+				rowMap[colName] = v
+			}
+		}
+		if !first {
+			file.WriteString(",\n")
+		}
+		first = false
+		encBuf, err := json.MarshalIndent(rowMap, "  ", "  ")
+		if err != nil {
+			log.Fatalf("Error marshaling row: %v", err)
+		}
+		file.Write(encBuf)
 		rowCount++
 		if rowCount%1000 == 0 {
 			fmt.Printf("\rDownloaded %d rows...", rowCount)
@@ -230,18 +244,9 @@ func downloadTableJSON(db *sql.DB, table string, fieldsFile string) {
 	if err := rows.Err(); err != nil {
 		log.Fatalf("Row error: %v", err)
 	}
+	file.WriteString("]\n")
 	fmt.Printf("\rTotal rows downloaded: %d\n", rowCount)
 
-	fmt.Printf("Writing data to JSON file...\n")
-	jsonData, err := json.MarshalIndent(results, "", "  ")
-	if err != nil {
-		log.Fatalf("Error marshaling JSON: %v", err)
-	}
-
-	filename := fmt.Sprintf("%s.json", strings.ToLower(table))
-	if err := os.WriteFile(filename, jsonData, 0644); err != nil {
-		log.Fatalf("Error writing JSON file: %v", err)
-	}
 	elapsed := time.Since(start)
 	fmt.Printf("Table '%s' data written to %s in %s\n", table, filename, elapsed)
 }
