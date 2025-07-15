@@ -40,11 +40,7 @@
 
 ## Usage
 
-
-## Usage
-
 Run the program with one of the following commands:
-
 
 ```
 go run main.go tables
@@ -65,8 +61,7 @@ Downloads all rows from the specified table in the chosen format. Default is JSO
 - `--fields=fields.txt` : (optional) File with list of fields to export (one per line)
 - `--format=json|tsv|csv|sqlite3|duckdb` : (optional) Output format (default: json)
 
-## Example
-
+## Examples
 
 ### Example: Download as JSON
 ```
