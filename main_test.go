@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"getmssql/dbexport"
+	"getmssql/cli"
 
 	"github.com/DATA-DOG/go-sqlmock"
 )
@@ -154,12 +155,7 @@ func TestCLI_InvalidFlag(t *testing.T) {
 		os.Stdout = origStdout
 	}()
 
-	// main() should print flag error and exit, so recover panic
-	defer func() {
-		_ = recover()
-	}()
-
-	main()
+	err := cli.RunCLI()
 	// Give the flag package a moment to flush output
 	time.Sleep(10 * time.Millisecond)
 	_ = wErr.Sync()
@@ -171,6 +167,9 @@ func TestCLI_InvalidFlag(t *testing.T) {
 	os.Stderr = origStderr
 	os.Stdout = origStdout
 	outStr := string(errOut) + string(stdOut)
+	if err == nil {
+		t.Errorf("expected error for invalid flag, got nil")
+	}
 	if !strings.Contains(outStr, "flag provided but not defined") && !strings.Contains(outStr, "unknown flag") && !strings.Contains(outStr, "Unknown command:") {
 		t.Errorf("expected flag error, got: %s", outStr)
 	}

@@ -11,6 +11,7 @@
 package main
 
 import (
+	"os"
 	"getmssql/cli"
 
 	_ "github.com/denisenkom/go-mssqldb"
@@ -19,5 +20,7 @@ import (
 )
 
 func main() {
-	cli.RunCLI()
+	if err := cli.RunCLI(); err != nil {
+		os.Exit(1)
+	}
 }

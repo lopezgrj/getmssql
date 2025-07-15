@@ -128,23 +128,25 @@ func parseDownload(args []string) (table, fieldsFile, format string, err error) 
 }
 
 // RunCLI parses CLI arguments and dispatches commands.
-func RunCLI() {
+func RunCLI() error {
 	if len(os.Args) < 2 {
 		showUsage(os.Stderr)
-		os.Exit(1)
+		return fmt.Errorf("no command provided")
 	}
 
 	// Handle -h and --help
 	if os.Args[1] == "-h" || os.Args[1] == "--help" || os.Args[1] == "help" {
 		showUsage(os.Stdout)
-		return
+		return nil
 	}
 
 	switch os.Args[1] {
 	case "download":
+		var runErr error
 		withDB(func(ctx context.Context, db *sql.DB) error {
 			table, fieldsFile, format, err := parseDownload(os.Args[2:])
 			if err != nil {
+				runErr = err
 				return err
 			}
 			format = strings.ToLower(format)
@@ -152,29 +154,36 @@ func RunCLI() {
 			asCSV := format == "csv"
 			asSQLite := format == "sqlite3"
 			asDuckDB := format == "duckdb"
-			return dbexport.DownloadTable(db, table, fieldsFile, asTSV, asCSV, asSQLite, asDuckDB)
+			runErr = dbexport.DownloadTable(db, table, fieldsFile, asTSV, asCSV, asSQLite, asDuckDB)
+			return runErr
 		})
-		return
+		return runErr
 	case "tables":
+		var runErr error
 		withDB(func(ctx context.Context, db *sql.DB) error {
 			if err := parseTables(os.Args[2:]); err != nil {
-				return fmt.Errorf("error parsing tables command: %v", err)
+				runErr = fmt.Errorf("error parsing tables command: %v", err)
+				return runErr
 			}
-			return dbexport.ListTables(db)
+			runErr = dbexport.ListTables(db)
+			return runErr
 		})
-		return
+		return runErr
 	case "fields":
+		var runErr error
 		withDB(func(ctx context.Context, db *sql.DB) error {
 			table, err := parseFields(os.Args[2:])
 			if err != nil {
+				runErr = err
 				return err
 			}
-			return dbexport.ListFields(db, table)
+			runErr = dbexport.ListFields(db, table)
+			return runErr
 		})
-		return
+		return runErr
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", os.Args[1])
 		showUsage(os.Stderr)
-		os.Exit(1)
+		return fmt.Errorf("unknown command: %s", os.Args[1])
 	}
 }
