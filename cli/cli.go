@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"flag"
 	"fmt"
-	"log"
 	"os"
 	"os/signal"
 	"strings"
@@ -17,35 +16,42 @@ import (
 )
 
 // withDB handles DB connection, context, signal handling, and cleanup. It calls fn with the DB and context.
-func withDB(fn func(ctx context.Context, db *sql.DB) error) {
-	server, port, user, password, database := loadAndValidateEnv()
+func withDB(fn func(ctx context.Context, db *sql.DB) error) error {
+	server, port, user, password, database, err := loadAndValidateEnv()
+	if err != nil {
+		return err
+	}
 	connString := fmt.Sprintf("server=%s;user id=%s;password=%s;port=%s;database=%s;encrypt=disable", server, user, password, port, database)
 	db, err := sql.Open("sqlserver", connString)
 	if err != nil {
-		log.Fatalf("Error creating connection pool: %v", err)
+		return fmt.Errorf("error creating connection pool: %v", err)
 	}
 	defer db.Close()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	interrupted := make(chan os.Signal, 1)
 	signal.Notify(interrupted, os.Interrupt, syscall.SIGTERM)
+	var signalErr error
 	go func() {
 		<-ctx.Done()
 		select {
 		case sig := <-interrupted:
-			fmt.Fprintf(os.Stderr, "\nReceived %v. Closing database connection and exiting...\n", sig)
+			signalErr = fmt.Errorf("received signal: %v", sig)
 			db.Close()
-			os.Exit(130)
 		default:
 		}
 	}()
 	if err := db.Ping(); err != nil {
-		log.Fatalf("Cannot connect to database: %v", err)
+		return fmt.Errorf("cannot connect to database: %v", err)
 	}
 	fmt.Println("Connected to MSSQL successfully!")
 	if err := fn(ctx, db); err != nil {
-		log.Fatalf("%v", err)
+		return err
 	}
+	if signalErr != nil {
+		return signalErr
+	}
+	return nil
 }
 
 // showUsage prints the usage instructions for the application to the given writer.
@@ -63,7 +69,7 @@ getmssql download [--fields <fields_file>] [--format <format>] <table_name>
 }
 
 // loadAndValidateEnv loads .env and required MSSQL environment variables, returning them or logging fatally if missing.
-func loadAndValidateEnv() (server, port, user, password, database string) {
+func loadAndValidateEnv() (server, port, user, password, database string, err error) {
 	_ = godotenv.Load()
 	server = strings.TrimSpace(os.Getenv("MSSQL_SERVER"))
 	port = strings.TrimSpace(os.Getenv("MSSQL_PORT"))
@@ -87,7 +93,7 @@ func loadAndValidateEnv() (server, port, user, password, database string) {
 		missingVars = append(missingVars, "MSSQL_DATABASE")
 	}
 	if len(missingVars) > 0 {
-		log.Fatalf("Missing required environment variables: %s", strings.Join(missingVars, ", "))
+		err = fmt.Errorf("missing required environment variables: %s", strings.Join(missingVars, ", "))
 	}
 	return
 }
@@ -143,10 +149,9 @@ func RunCLI() error {
 	switch os.Args[1] {
 	case "download":
 		var runErr error
-		withDB(func(ctx context.Context, db *sql.DB) error {
+		runErr = withDB(func(ctx context.Context, db *sql.DB) error {
 			table, fieldsFile, format, err := parseDownload(os.Args[2:])
 			if err != nil {
-				runErr = err
 				return err
 			}
 			format = strings.ToLower(format)
@@ -154,31 +159,38 @@ func RunCLI() error {
 			asCSV := format == "csv"
 			asSQLite := format == "sqlite3"
 			asDuckDB := format == "duckdb"
-			runErr = dbexport.DownloadTable(db, table, fieldsFile, asTSV, asCSV, asSQLite, asDuckDB)
-			return runErr
+			err = dbexport.DownloadTable(db, table, fieldsFile, asTSV, asCSV, asSQLite, asDuckDB)
+			if err != nil {
+				if isInvalidTableError(err) {
+					return fmt.Errorf("%v.\n\nverifica que el nombre de la tabla o vista exista en la base de datos y esté correctamente escrito. si pertenece a otro esquema, usa el nombre completo (por ejemplo: esquema.tabla)", err)
+				}
+			}
+			return err
 		})
 		return runErr
 	case "tables":
 		var runErr error
-		withDB(func(ctx context.Context, db *sql.DB) error {
+		runErr = withDB(func(ctx context.Context, db *sql.DB) error {
 			if err := parseTables(os.Args[2:]); err != nil {
-				runErr = fmt.Errorf("error parsing tables command: %v", err)
-				return runErr
+				return fmt.Errorf("error parsing tables command: %v", err)
 			}
-			runErr = dbexport.ListTables(db)
-			return runErr
+			return dbexport.ListTables(db)
 		})
 		return runErr
 	case "fields":
 		var runErr error
-		withDB(func(ctx context.Context, db *sql.DB) error {
+		runErr = withDB(func(ctx context.Context, db *sql.DB) error {
 			table, err := parseFields(os.Args[2:])
 			if err != nil {
-				runErr = err
 				return err
 			}
-			runErr = dbexport.ListFields(db, table)
-			return runErr
+			err = dbexport.ListFields(db, table)
+			if err != nil {
+				if isInvalidTableError(err) {
+					return fmt.Errorf("%v.\n\nverifica que el nombre de la tabla o vista exista en la base de datos y esté correctamente escrito. si pertenece a otro esquema, usa el nombre completo (por ejemplo: esquema.tabla)", err)
+				}
+			}
+			return err
 		})
 		return runErr
 	default:
@@ -186,4 +198,23 @@ func RunCLI() error {
 		showUsage(os.Stderr)
 		return fmt.Errorf("unknown command: %s", os.Args[1])
 	}
+}
+
+// isInvalidTableError checks recursively for substrings indicating a missing/invalid table in any wrapped error.
+func isInvalidTableError(err error) bool {
+	for err != nil {
+		errStr := strings.ToLower(err.Error())
+		if strings.Contains(errStr, "could not get total row count") ||
+			((strings.Contains(errStr, "no es válido") && strings.Contains(errStr, "nombre de objeto")) ||
+				strings.Contains(errStr, "is not a valid object name")) {
+			return true
+		}
+		type unwrapper interface{ Unwrap() error }
+		if u, ok := err.(unwrapper); ok {
+			err = u.Unwrap()
+		} else {
+			break
+		}
+	}
+	return false
 }

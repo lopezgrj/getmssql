@@ -67,8 +67,7 @@ func DownloadTable(db *sql.DB, table string, fieldsFile string, asTSV, asCSV, as
 	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM [%s]", table)
 	err = db.QueryRow(countQuery).Scan(&totalRows)
 	if err != nil {
-		fmt.Printf("Warning: could not get total row count: %v\n", err)
-		totalRows = -1
+		return fmt.Errorf("could not get total row count: %w", err)
 	}
 
 	fmt.Printf("Starting download of table '%s'%s... ", table, func() string {
@@ -78,11 +77,7 @@ func DownloadTable(db *sql.DB, table string, fieldsFile string, asTSV, asCSV, as
 			return ""
 		}
 	}())
-	if totalRows >= 0 {
-		fmt.Printf("(total rows: %d)\n", totalRows)
-	} else {
-		fmt.Printf("(total rows: unknown)\n")
-	}
+	fmt.Printf("(total rows: %d)\n", totalRows)
 
 	rows, err := db.Query(query)
 	if err != nil {
