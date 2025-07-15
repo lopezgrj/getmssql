@@ -66,7 +66,11 @@ func main() {
 			showUsage()
 			return
 		}
-		downloadTableJSON(db, os.Args[2])
+		var fieldsFile string
+		if len(os.Args) >= 4 {
+			fieldsFile = os.Args[3]
+		}
+		downloadTableJSON(db, os.Args[2], fieldsFile)
 		return
 	default:
 		fmt.Printf("Unknown command: %s\n", os.Args[1])
@@ -145,10 +149,33 @@ func listFields(db *sql.DB, table string) {
 // downloadTableJSON downloads all rows from a specified table and saves them as a JSON file
 // The file is named after the table in lowercase with a .json extension
 // Example: If the table is named "Users", the file will be named "users.json
-func downloadTableJSON(db *sql.DB, table string) {
+func downloadTableJSON(db *sql.DB, table string, fieldsFile string) {
 	start := time.Now()
-	fmt.Printf("Starting download of table '%s'...\n", table)
-	query := fmt.Sprintf("SELECT * FROM [%s]", table)
+	var query string
+	var fields []string
+	if fieldsFile != "" {
+		// Read fields from file
+		data, err := os.ReadFile(fieldsFile)
+		if err != nil {
+			log.Fatalf("Error reading fields file: %v", err)
+		}
+		lines := strings.Split(string(data), "\n")
+		for _, line := range lines {
+			trimmed := strings.TrimSpace(line)
+			if trimmed != "" {
+				fields = append(fields, trimmed)
+			}
+		}
+		if len(fields) == 0 {
+			log.Fatalf("No fields found in file: %s", fieldsFile)
+		}
+		query = fmt.Sprintf("SELECT %s FROM [%s]", strings.Join(fields, ", "), table)
+		fmt.Printf("Starting download of table '%s' with fields from '%s'...\n", table, fieldsFile)
+	} else {
+		query = fmt.Sprintf("SELECT * FROM [%s]", table)
+		fmt.Printf("Starting download of table '%s'...\n", table)
+	}
+
 	rows, err := db.Query(query)
 	if err != nil {
 		log.Fatalf("Error querying table rows: %v", err)
@@ -174,7 +201,13 @@ func downloadTableJSON(db *sql.DB, table string) {
 		rowMap := make(map[string]interface{})
 		for i, colName := range cols {
 			val := columnPointers[i].(*interface{})
-			rowMap[colName] = *val
+			v := *val
+			switch t := v.(type) {
+			case time.Time:
+				rowMap[colName] = t.Format("2006-01-02")
+			default:
+				rowMap[colName] = v
+			}
 		}
 		results = append(results, rowMap)
 		rowCount++
