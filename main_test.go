@@ -6,16 +6,18 @@ import (
 	"testing"
 	"time"
 
+	"getmssql/dbexport"
+
 	"github.com/DATA-DOG/go-sqlmock"
 )
 
 func TestBuildSelectQuery_AllFields(t *testing.T) {
-	query, fields := buildSelectQuery("mytable", "")
+	query, err := dbexport.BuildSelectQuery("mytable", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if !strings.HasPrefix(query, "SELECT * FROM [mytable]") {
 		t.Errorf("Expected SELECT * query, got: %s", query)
-	}
-	if fields != nil {
-		t.Errorf("Expected nil fields, got: %v", fields)
 	}
 }
 
@@ -26,13 +28,14 @@ func TestBuildSelectQuery_FieldsFile(t *testing.T) {
 		t.Fatalf("Failed to write test fields file: %v", err)
 	}
 	defer os.Remove(fname)
-	query, fields := buildSelectQuery("mytable", fname)
+	query, err := dbexport.BuildSelectQuery("mytable", fname)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if !strings.HasPrefix(query, "SELECT foo, bar FROM [mytable]") {
 		t.Errorf("Unexpected query: %s", query)
 	}
-	if len(fields) != 2 || fields[0] != "foo" || fields[1] != "bar" {
-		t.Errorf("Unexpected fields: %v", fields)
-	}
+	// Optionally, parse fields from the query string if you want to check them
 }
 
 func TestScanRowValuesAndMap(t *testing.T) {
@@ -58,7 +61,7 @@ func TestScanRowValuesAndMap(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("expected at least one row")
 	}
-	vals := scanRowValues(rows, columns)
+	vals := dbexport.ScanRowValues(rows, columns)
 	if len(vals) != 3 {
 		t.Errorf("expected 3 values, got %d", len(vals))
 	}
@@ -75,7 +78,7 @@ func TestScanRowValuesAndMap(t *testing.T) {
 	if !rows.Next() {
 		t.Fatal("expected second row")
 	}
-	vals2 := scanRowValues(rows, columns)
+	vals2 := dbexport.ScanRowValues(rows, columns)
 	if vals2[0] != nil {
 		t.Errorf("expected nil for first value, got %v", vals2[0])
 	}
@@ -98,7 +101,7 @@ func TestScanRowValuesAndMap(t *testing.T) {
 	if !rows2.Next() {
 		t.Fatal("expected at least one row")
 	}
-	m := scanRowMap(rows2, []string{"a", "b"})
+	m := dbexport.ScanRowMap(rows2, []string{"a", "b"})
 	if m["a"] != "x" || m["b"] != int64(123) {
 		t.Errorf("unexpected map values: %v", m)
 	}
