@@ -53,12 +53,12 @@ func parseDownload(args []string) (table, fieldsFile, format string, err error) 
 // showUsage prints the usage instructions for the application
 func showUsage() {
 	fmt.Println(`Usage:
-      go run main.go tables
-	    List all tables in the database
-      go run main.go fields <table_name>
-        List all fields in the specified table
-      go run main.go download [--fields <fields_file>] [--format <format>] <table_name>
-        Export data from the specified table. Format can be: json, tsv, csv, sqlite3, duckdb (default: json)`)
+	  go run main.go tables
+		List all tables in the database
+	  go run main.go fields <table_name>
+		List all fields in the specified table
+	  go run main.go download [--fields <fields_file>] [--format <format>] <table_name>
+		Export data from the specified table. Format can be: json, tsv, csv, sqlite3, duckdb (default: json)`)
 }
 
 func main() {
@@ -119,6 +119,20 @@ func main() {
 	}
 
 	switch os.Args[1] {
+	case "download":
+		table, fieldsFile, format, err := parseDownload(os.Args[2:])
+		if err != nil {
+			log.Fatalf("%v", err)
+		}
+		format = strings.ToLower(format)
+		asTSV := format == "tsv"
+		asCSV := format == "csv"
+		asSQLite := format == "sqlite3"
+		asDuckDB := format == "duckdb"
+		if err := dbexport.DownloadTable(db, table, fieldsFile, asTSV, asCSV, asSQLite, asDuckDB); err != nil {
+			log.Fatalf("Error downloading table: %v", err)
+		}
+		return
 	case "tables":
 		if err := parseTables(os.Args[2:]); err != nil {
 			log.Fatalf("Error parsing tables command: %v", err)
@@ -130,9 +144,7 @@ func main() {
 	case "fields":
 		table, err := parseFields(os.Args[2:])
 		if err != nil {
-			fmt.Println(err)
-			showUsage()
-			return
+			log.Fatalf("%v", err)
 		}
 		if err := dbexport.ListFields(db, table); err != nil {
 			log.Fatalf("Error listing fields: %v", err)
