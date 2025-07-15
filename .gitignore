@@ -31,3 +31,4 @@ Thumbs.db
 
 # Files not to track
 /fields/
+*.json

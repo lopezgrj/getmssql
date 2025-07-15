@@ -1,3 +1,6 @@
+// listTables prints all table names in the connected MSSQL database
+// listFields prints all columns for a given table in the connected MSSQL database
+
 package main
 
 import (
@@ -81,8 +84,55 @@ func showUsage() {
 	fmt.Println("  go run main.go fields <table_name>    # List all fields in the specified table")
 	fmt.Println("  go run main.go download <table_name>  # Download all rows from the table as JSON file")
 }
+
+// listTables prints all table names in the connected MSSQL database
+func listTables(db *sql.DB) {
+	query := `SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE' ORDER BY TABLE_NAME`
+	rows, err := db.Query(query)
+	if err != nil {
+		log.Fatalf("Error querying tables: %v", err)
+	}
+	defer rows.Close()
+
+	fmt.Println("Tables in the database:")
+	for rows.Next() {
+		var tableName string
+		if err := rows.Scan(&tableName); err != nil {
+			log.Fatalf("Error scanning table name: %v", err)
+		}
+		fmt.Println(tableName)
+	}
+	if err := rows.Err(); err != nil {
+		log.Fatalf("Row error: %v", err)
+	}
+}
+
+// listFields prints all columns for a given table in the connected MSSQL database
+func listFields(db *sql.DB, table string) {
+	query := `SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = @p1 ORDER BY ORDINAL_POSITION`
+	rows, err := db.Query(query, table)
+	if err != nil {
+		log.Fatalf("Error querying fields: %v", err)
+	}
+	defer rows.Close()
+
+	fmt.Printf("Fields in table '%s':\n", table)
+	fmt.Println("Column Name\tType\tNullable")
+	for rows.Next() {
+		var colName, dataType, isNullable string
+		if err := rows.Scan(&colName, &dataType, &isNullable); err != nil {
+			log.Fatalf("Error scanning field: %v", err)
+		}
+		fmt.Printf("%s\t%s\t%s\n", colName, dataType, isNullable)
+	}
+	if err := rows.Err(); err != nil {
+		log.Fatalf("Row error: %v", err)
+	}
+}
+
 func downloadTableJSON(db *sql.DB, table string) {
 	start := time.Now()
+	fmt.Printf("Starting download of table '%s'...\n", table)
 	query := fmt.Sprintf("SELECT * FROM [%s]", table)
 	rows, err := db.Query(query)
 	if err != nil {
@@ -116,6 +166,7 @@ func downloadTableJSON(db *sql.DB, table string) {
 		log.Fatalf("Row error: %v", err)
 	}
 
+	fmt.Printf("Writing data to JSON file...\n")
 	jsonData, err := json.MarshalIndent(results, "", "  ")
 	if err != nil {
 		log.Fatalf("Error marshaling JSON: %v", err)
@@ -127,45 +178,4 @@ func downloadTableJSON(db *sql.DB, table string) {
 	}
 	elapsed := time.Since(start)
 	fmt.Printf("Table '%s' data written to %s in %s\n", table, filename, elapsed)
-}
-func listFields(db *sql.DB, table string) {
-	query := `SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = @p1 ORDER BY ORDINAL_POSITION`
-	rows, err := db.Query(query, table)
-	if err != nil {
-		log.Fatalf("Error querying fields: %v", err)
-	}
-	defer rows.Close()
-
-	fmt.Printf("Fields in table '%s':\n", table)
-	fmt.Println("Column Name\tType\tNullable")
-	for rows.Next() {
-		var name, dataType, isNullable string
-		if err := rows.Scan(&name, &dataType, &isNullable); err != nil {
-			log.Fatalf("Error scanning row: %v", err)
-		}
-		fmt.Printf("%s\t%s\t%s\n", name, dataType, isNullable)
-	}
-	if err := rows.Err(); err != nil {
-		log.Fatalf("Row error: %v", err)
-	}
-}
-
-func listTables(db *sql.DB) {
-	rows, err := db.Query(`SELECT TABLE_SCHEMA, TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE' ORDER BY TABLE_SCHEMA, TABLE_NAME`)
-	if err != nil {
-		log.Fatalf("Error querying tables: %v", err)
-	}
-	defer rows.Close()
-
-	fmt.Println("Tables in the database:")
-	for rows.Next() {
-		var schema, name string
-		if err := rows.Scan(&schema, &name); err != nil {
-			log.Fatalf("Error scanning row: %v", err)
-		}
-		fmt.Printf("%s.%s\n", schema, name)
-	}
-	if err := rows.Err(); err != nil {
-		log.Fatalf("Row error: %v", err)
-	}
 }
