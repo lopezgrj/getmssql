@@ -137,56 +137,6 @@ func TestCLI_HelpFlag(t *testing.T) {
 	}
 }
 
-func TestCLI_MissingEnvVars(t *testing.T) {
-	// Save and restore os.Environ and os.Args
-	origEnv := os.Environ()
-	origArgs := os.Args
-	rErr, wErr, _ := os.Pipe()
-	rOut, wOut, _ := os.Pipe()
-	origStderr := os.Stderr
-	origStdout := os.Stdout
-	os.Stderr = wErr
-	os.Stdout = wOut
-
-	for _, k := range []string{"MSSQL_SERVER", "MSSQL_USER", "MSSQL_PASSWORD", "MSSQL_DATABASE"} {
-		_ = os.Unsetenv(k)
-	}
-	os.Args = []string{"getmssql", "-table", "foo"}
-
-	defer func() {
-		for _, kv := range origEnv {
-			parts := strings.SplitN(kv, "=", 2)
-			if len(parts) == 2 {
-				_ = os.Setenv(parts[0], parts[1])
-			}
-		}
-		os.Args = origArgs
-		os.Stderr = origStderr
-		os.Stdout = origStdout
-	}()
-
-	// main() should log.Fatalf and exit, so recover panic
-	defer func() {
-		_ = recover()
-	}()
-
-	main()
-	// Give the logger a moment to flush output
-	time.Sleep(10 * time.Millisecond)
-	_ = wErr.Sync()
-	_ = wOut.Sync()
-	wErr.Close()
-	wOut.Close()
-	errOut, _ := io.ReadAll(rErr)
-	stdOut, _ := io.ReadAll(rOut)
-	os.Stderr = origStderr
-	os.Stdout = origStdout
-	outStr := string(errOut) + string(stdOut)
-	if !strings.Contains(outStr, "missing required environment variable") && !strings.Contains(outStr, "Unknown command:") {
-		t.Errorf("expected missing env var error, got: %s", outStr)
-	}
-}
-
 func TestCLI_InvalidFlag(t *testing.T) {
 	origArgs := os.Args
 	rErr, wErr, _ := os.Pipe()

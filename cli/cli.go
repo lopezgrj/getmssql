@@ -64,14 +64,12 @@ getmssql download [--fields <fields_file>] [--format <format>] <table_name>
 
 // loadAndValidateEnv loads .env and required MSSQL environment variables, returning them or logging fatally if missing.
 func loadAndValidateEnv() (server, port, user, password, database string) {
-	if err := godotenv.Load(); err != nil {
-		log.Fatalf("Error loading .env file: %v", err)
-	}
-	server = os.Getenv("MSSQL_SERVER")
-	port = os.Getenv("MSSQL_PORT")
-	user = os.Getenv("MSSQL_USER")
-	password = os.Getenv("MSSQL_PASSWORD")
-	database = os.Getenv("MSSQL_DATABASE")
+	_ = godotenv.Load()
+	server = strings.TrimSpace(os.Getenv("MSSQL_SERVER"))
+	port = strings.TrimSpace(os.Getenv("MSSQL_PORT"))
+	user = strings.TrimSpace(os.Getenv("MSSQL_USER"))
+	password = strings.TrimSpace(os.Getenv("MSSQL_PASSWORD"))
+	database = strings.TrimSpace(os.Getenv("MSSQL_DATABASE"))
 	missingVars := []string{}
 	if server == "" {
 		missingVars = append(missingVars, "MSSQL_SERVER")
