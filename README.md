@@ -2,7 +2,7 @@
 # getmssql
 
 
-`getmssql` is a simple and idiomatic Go project for exporting tables from a Microsoft SQL Server database to various formats (JSON, TSV, CSV, SQLite3).
+`getmssql` is a simple and idiomatic Go project for exporting tables from a Microsoft SQL Server database to various formats (JSON, TSV, CSV, SQLite3, Duckdb).
 
 ## Features
 
