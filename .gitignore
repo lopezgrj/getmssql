@@ -36,3 +36,5 @@ Thumbs.db
 *.csv
 *.sqlite3
 *.duckdb
+getmssql
+
