@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"database/sql"
+	"flag"
 	"fmt"
 	"os"
 	"strings"
@@ -10,26 +11,56 @@ import (
 	dbexport "getmssql/dbexport"
 )
 
+// Flag variables for command line arguments
+// These flags are used to specify the database connection parameters.
+// They can be set via command line arguments or environment variables.
+// setConnectionFlags sets package-level pointers for connection flags for use in env.go
+var (
+	flagServer   string
+	flagPort     string
+	flagUser     string
+	flagPassword string
+	flagDatabase string
+)
+
 // RunCLI parses CLI arguments and dispatches commands.
 // It returns an error if the command is invalid or if a subcommand fails.
 func RunCLI() error {
-	if len(os.Args) < 2 {
+	// Use a local FlagSet for CLI flags to avoid test conflicts
+	fs := flag.NewFlagSet("getmssql", flag.ExitOnError)
+	// Add -h and --help support to print usage and all flags
+	for _, arg := range os.Args[1:] {
+		if arg == "-h" || arg == "--help" {
+			showUsage(os.Stderr)
+			fmt.Fprintln(os.Stderr, "")
+			fs.PrintDefaults()
+			os.Exit(0)
+		}
+	}
+	fs.StringVar(&flagServer, "server", "", "MSSQL server hostname or IP (env: MSSQL_SERVER)")
+	fs.StringVar(&flagPort, "port", "", "MSSQL server port (env: MSSQL_PORT)")
+	fs.StringVar(&flagUser, "user", "", "MSSQL username (env: MSSQL_USER)")
+	fs.StringVar(&flagPassword, "password", "", "MSSQL password (env: MSSQL_PASSWORD)")
+	fs.StringVar(&flagDatabase, "database", "", "MSSQL database name (env: MSSQL_DATABASE)")
+	// Parse command line arguments
+	fs.Parse(os.Args[1:])
+	args := fs.Args()
+	// Check if any command is provided
+	if len(args) < 1 {
 		showUsage(os.Stderr)
 		return fmt.Errorf("no command provided")
 	}
 
-	// Handle -h and --help
-	if os.Args[1] == "-h" || os.Args[1] == "--help" || os.Args[1] == "help" {
-		showUsage(os.Stdout)
-		return nil
-	}
-
-	switch os.Args[1] {
+	// Handle version command
+	switch args[0] {
 	case "version":
 		fmt.Println("getmssql version", Version)
 		return nil
 	case "download":
-		// download exports data from the specified table in the chosen format.
+		// Require tablename argument
+		if len(args) < 2 || strings.TrimSpace(args[1]) == "" {
+			return fmt.Errorf("missing required tablename argument for 'download'. Usage: %s download <tablename> [options]", os.Args[0])
+		}
 		var runErr error
 		runErr = withDB(func(ctx context.Context, db *sql.DB) error {
 			table, fieldsFile, format, err := parseDownload(os.Args[2:])
@@ -61,7 +92,10 @@ func RunCLI() error {
 		})
 		return runErr
 	case "fields":
-		// fields lists all fields in the specified table.
+		// Require tablename argument
+		if len(args) < 2 || strings.TrimSpace(args[1]) == "" {
+			return fmt.Errorf("missing required tablename argument for 'fields'. Usage: %s fields <tablename>", os.Args[0])
+		}
 		var runErr error
 		runErr = withDB(func(ctx context.Context, db *sql.DB) error {
 			table, err := parseFields(os.Args[2:])
