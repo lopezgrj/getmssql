@@ -3,137 +3,15 @@ package cli
 import (
 	"context"
 	"database/sql"
-	"flag"
 	"fmt"
 	"os"
-	"os/signal"
 	"strings"
-	"syscall"
 
 	dbexport "getmssql/dbexport"
-
-	"github.com/joho/godotenv"
 )
 
-// withDB handles DB connection, context, signal handling, and cleanup. It calls fn with the DB and context.
-func withDB(fn func(ctx context.Context, db *sql.DB) error) error {
-	server, port, user, password, database, err := loadAndValidateEnv()
-	if err != nil {
-		return err
-	}
-	connString := fmt.Sprintf("server=%s;user id=%s;password=%s;port=%s;database=%s;encrypt=disable", server, user, password, port, database)
-	db, err := sql.Open("sqlserver", connString)
-	if err != nil {
-		return fmt.Errorf("error creating connection pool: %v", err)
-	}
-	defer db.Close()
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	interrupted := make(chan os.Signal, 1)
-	signal.Notify(interrupted, os.Interrupt, syscall.SIGTERM)
-	var signalErr error
-	go func() {
-		<-ctx.Done()
-		select {
-		case sig := <-interrupted:
-			signalErr = fmt.Errorf("received signal: %v", sig)
-			db.Close()
-		default:
-		}
-	}()
-	if err := db.Ping(); err != nil {
-		return fmt.Errorf("cannot connect to database: %v", err)
-	}
-	fmt.Println("Connected to MSSQL successfully!")
-	if err := fn(ctx, db); err != nil {
-		return err
-	}
-	if signalErr != nil {
-		return signalErr
-	}
-	return nil
-}
-
-// showUsage prints the usage instructions for the application to the given writer.
-func showUsage(w *os.File) {
-	fmt.Fprint(w, `Usage:
-getmssql tables
-  List all tables in the database
-
-getmssql fields <table_name>
-  List all fields in the specified table
-
-getmssql download [--fields <fields_file>] [--format <format>] <table_name>
-  Export data from the specified table.
-  Format can be: json, tsv, csv, sqlite3, duckdb (default: json)`)
-}
-
-// loadAndValidateEnv loads .env and required MSSQL environment variables, returning them or logging fatally if missing.
-func loadAndValidateEnv() (server, port, user, password, database string, err error) {
-	_ = godotenv.Load()
-	server = strings.TrimSpace(os.Getenv("MSSQL_SERVER"))
-	port = strings.TrimSpace(os.Getenv("MSSQL_PORT"))
-	user = strings.TrimSpace(os.Getenv("MSSQL_USER"))
-	password = strings.TrimSpace(os.Getenv("MSSQL_PASSWORD"))
-	database = strings.TrimSpace(os.Getenv("MSSQL_DATABASE"))
-	missingVars := []string{}
-	if server == "" {
-		missingVars = append(missingVars, "MSSQL_SERVER")
-	}
-	if port == "" {
-		missingVars = append(missingVars, "MSSQL_PORT")
-	}
-	if user == "" {
-		missingVars = append(missingVars, "MSSQL_USER")
-	}
-	if password == "" {
-		missingVars = append(missingVars, "MSSQL_PASSWORD")
-	}
-	if database == "" {
-		missingVars = append(missingVars, "MSSQL_DATABASE")
-	}
-	if len(missingVars) > 0 {
-		err = fmt.Errorf("missing required environment variables: %s", strings.Join(missingVars, ", "))
-	}
-	return
-}
-
-// parseTables parses the 'tables' subcommand flags.
-func parseTables(args []string) error {
-	tablesCmd := flag.NewFlagSet("tables", flag.ExitOnError)
-	if err := tablesCmd.Parse(args); err != nil {
-		return err
-	}
-	return nil
-}
-
-// parseFields parses the 'fields' subcommand flags and validates arguments.
-func parseFields(args []string) (string, error) {
-	fieldsCmd := flag.NewFlagSet("fields", flag.ExitOnError)
-	if err := fieldsCmd.Parse(args); err != nil {
-		return "", err
-	}
-	if fieldsCmd.NArg() < 1 {
-		return "", fmt.Errorf("please provide a table name")
-	}
-	return fieldsCmd.Arg(0), nil
-}
-
-// parseDownload parses the 'download' subcommand flags and validates arguments.
-func parseDownload(args []string) (table, fieldsFile, format string, err error) {
-	downloadCmd := flag.NewFlagSet("download", flag.ExitOnError)
-	downloadFields := downloadCmd.String("fields", "", "File with list of fields to export (one per line)")
-	downloadFormat := downloadCmd.String("format", "json", "Output format: json, tsv, csv, sqlite3, duckdb")
-	if err := downloadCmd.Parse(args); err != nil {
-		return "", "", "", err
-	}
-	if downloadCmd.NArg() < 1 {
-		return "", "", "", fmt.Errorf("please provide a table name")
-	}
-	return downloadCmd.Arg(0), *downloadFields, *downloadFormat, nil
-}
-
 // RunCLI parses CLI arguments and dispatches commands.
+// It returns an error if the command is invalid or if a subcommand fails.
 func RunCLI() error {
 	if len(os.Args) < 2 {
 		showUsage(os.Stderr)
@@ -147,7 +25,11 @@ func RunCLI() error {
 	}
 
 	switch os.Args[1] {
+	case "version":
+		fmt.Println("getmssql version", Version)
+		return nil
 	case "download":
+		// download exports data from the specified table in the chosen format.
 		var runErr error
 		runErr = withDB(func(ctx context.Context, db *sql.DB) error {
 			table, fieldsFile, format, err := parseDownload(os.Args[2:])
@@ -169,6 +51,7 @@ func RunCLI() error {
 		})
 		return runErr
 	case "tables":
+		// tables lists all tables in the database.
 		var runErr error
 		runErr = withDB(func(ctx context.Context, db *sql.DB) error {
 			if err := parseTables(os.Args[2:]); err != nil {
@@ -178,6 +61,7 @@ func RunCLI() error {
 		})
 		return runErr
 	case "fields":
+		// fields lists all fields in the specified table.
 		var runErr error
 		runErr = withDB(func(ctx context.Context, db *sql.DB) error {
 			table, err := parseFields(os.Args[2:])
@@ -198,23 +82,4 @@ func RunCLI() error {
 		showUsage(os.Stderr)
 		return fmt.Errorf("unknown command: %s", os.Args[1])
 	}
-}
-
-// isInvalidTableError checks recursively for substrings indicating a missing/invalid table in any wrapped error.
-func isInvalidTableError(err error) bool {
-	for err != nil {
-		errStr := strings.ToLower(err.Error())
-		if strings.Contains(errStr, "could not get total row count") ||
-			((strings.Contains(errStr, "no es válido") && strings.Contains(errStr, "nombre de objeto")) ||
-				strings.Contains(errStr, "is not a valid object name")) {
-			return true
-		}
-		type unwrapper interface{ Unwrap() error }
-		if u, ok := err.(unwrapper); ok {
-			err = u.Unwrap()
-		} else {
-			break
-		}
-	}
-	return false
 }
