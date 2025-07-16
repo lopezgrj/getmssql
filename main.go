@@ -11,6 +11,7 @@
 package main
 
 import (
+	"fmt"
 	"getmssql/cli"
 	"os"
 
@@ -21,6 +22,13 @@ import (
 
 func main() {
 	if err := cli.RunCLI(); err != nil {
+		// Print error to stderr before exiting
+		printlnErr(err)
 		os.Exit(1)
 	}
+}
+
+// printlnErr prints the error to stderr (using os.Stderr)
+func printlnErr(err error) {
+	fmt.Fprintln(os.Stderr, err)
 }

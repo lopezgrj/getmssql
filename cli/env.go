@@ -9,6 +9,7 @@ import (
 )
 
 // loadAndValidateEnv loads .env and required MSSQL environment variables, returning them or logging fatally if missing.
+// ...existing code...
 func loadAndValidateEnv() (server, port, user, password, database string, err error) {
 	_ = godotenv.Load()
 	server = strings.TrimSpace(os.Getenv("MSSQL_SERVER"))
@@ -33,7 +34,15 @@ func loadAndValidateEnv() (server, port, user, password, database string, err er
 		missingVars = append(missingVars, "MSSQL_DATABASE")
 	}
 	if len(missingVars) > 0 {
-		err = fmt.Errorf("missing required environment variables: %s", strings.Join(missingVars, ", "))
+		example := `
+Example .env file:
+MSSQL_SERVER=localhost
+MSSQL_PORT=1433
+MSSQL_USER=youruser
+MSSQL_PASSWORD=yourpassword
+MSSQL_DATABASE=yourdatabase
+`
+		err = fmt.Errorf("missing required environment variables: %s\n%s", strings.Join(missingVars, ", "), example)
 	}
 	return
 }
