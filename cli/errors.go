@@ -1,11 +1,16 @@
 package cli
 
-import "strings"
+import (
+	"log"
+	"strings"
+)
 
 // isInvalidTableError checks recursively for substrings indicating a missing/invalid table in any wrapped error.
 // isInvalidTableError checks recursively for substrings indicating a missing/invalid table in any wrapped error.
 // It matches common English and Spanish SQL Server and driver error messages.
 func isInvalidTableError(err error) bool {
+	// Always print the incoming error for debugging
+	log.Printf("[DEBUG] isInvalidTableError called with: %v\n", err)
 	// List of substrings that indicate a missing/invalid table error
 	var patterns = []string{
 		"could not get total row count",
@@ -46,7 +51,7 @@ func isInvalidTableError(err error) bool {
 	if !matched && origErr != nil {
 		// Debug print: log the original error string if no pattern matched
 		// Remove or comment out this line after debugging
-		println("[DEBUG] isInvalidTableError: no match for error:", origErr.Error())
+		log.Printf("[DEBUG] isInvalidTableError: no match for error: %v\n", origErr)
 	}
 	return false
 }
