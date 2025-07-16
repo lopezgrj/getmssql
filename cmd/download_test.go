@@ -7,9 +7,11 @@ import (
 
 func TestDownload_Help(t *testing.T) {
 	buf := new(bytes.Buffer)
-	downloadCmd.SetOut(buf)
-	downloadCmd.SetArgs([]string{"--help"})
-	err := downloadCmd.Execute()
+	rootCmd.SetOut(buf)
+	rootCmd.SetArgs([]string{"download", "--help"})
+	err := rootCmd.Execute()
+	// Reset args after test to avoid state leakage
+	rootCmd.SetArgs([]string{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

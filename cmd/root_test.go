@@ -21,11 +21,14 @@ func TestRoot_Help(t *testing.T) {
 }
 
 func TestRoot_UnknownCommand(t *testing.T) {
-	   buf := new(bytes.Buffer)
-	   rootCmd.SetOut(buf)
-	   rootCmd.SetArgs([]string{"notacommand"})
-	   err := rootCmd.Execute()
-	   if err == nil || !strings.Contains(err.Error(), "unknown command") {
-			   t.Errorf("expected unknown command error, got: %v", err)
-	   }
+	buf := new(bytes.Buffer)
+	rootCmd.SetOut(buf)
+	rootCmd.SetArgs([]string{"notacommand"})
+	err := rootCmd.Execute()
+	// Reset args after test to avoid state leakage
+	rootCmd.SetArgs([]string{})
+	fieldsCmd.SetArgs([]string{})
+	if err == nil || !strings.Contains(err.Error(), "unknown command") {
+		t.Errorf("expected unknown command error, got: %v", err)
+	}
 }
