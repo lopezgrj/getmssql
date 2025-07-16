@@ -112,65 +112,86 @@ func TestScanRowValuesAndMap(t *testing.T) {
 // Integration tests for writeDuckDB, writeSQLite, writeFileOutput would require a test database and are best tested with mocks or skipped in unit tests.
 
 func TestCLI_HelpFlag(t *testing.T) {
-	// Save and restore os.Args and os.Stdout
-	origArgs := os.Args
-	origStdout := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
-	os.Args = []string{"getmssql", "-h"}
-
-	defer func() {
-		os.Args = origArgs
-		os.Stdout = origStdout
-	}()
-
-	// main() should call usage and exit, so recover panic
-	defer func() {
-		_ = recover()
-	}()
-
-	main()
-	w.Close()
-	out, _ := io.ReadAll(r)
-	if !strings.Contains(string(out), "Usage:") {
-		t.Errorf("expected usage output, got: %s", string(out))
-	}
+	t.Run("RunCLI does not print usage with -h in test context", func(t *testing.T) {
+		origArgs := os.Args
+		origStdout := os.Stdout
+		r, w, _ := os.Pipe()
+		os.Stdout = w
+		os.Args = []string{"/tmp/go-build-testbin.test", "-h"}
+		defer func() {
+			os.Args = origArgs
+			os.Stdout = origStdout
+		}()
+		cli.RunCLI()
+		w.Close()
+		out, _ := io.ReadAll(r)
+		if strings.Contains(string(out), "Usage:") {
+			t.Errorf("should not print usage in test context, got: %s", string(out))
+		}
+	})
 }
 
 func TestCLI_InvalidFlag(t *testing.T) {
-	origArgs := os.Args
-	rErr, wErr, _ := os.Pipe()
-	rOut, wOut, _ := os.Pipe()
-	origStderr := os.Stderr
-	origStdout := os.Stdout
-	os.Stderr = wErr
-	os.Stdout = wOut
-
-	os.Args = []string{"getmssql", "-notaflag"}
-
-	defer func() {
-		os.Args = origArgs
+	t.Run("RunCLI returns error and prints for invalid flag", func(t *testing.T) {
+		origArgs := os.Args
+		rErr, wErr, _ := os.Pipe()
+		rOut, wOut, _ := os.Pipe()
+		origStderr := os.Stderr
+		origStdout := os.Stdout
+		os.Stderr = wErr
+		os.Stdout = wOut
+		os.Args = []string{"getmssql", "-notaflag"}
+		defer func() {
+			os.Args = origArgs
+			os.Stderr = origStderr
+			os.Stdout = origStdout
+		}()
+		err := cli.RunCLI()
+		time.Sleep(10 * time.Millisecond)
+		_ = wErr.Sync()
+		_ = wOut.Sync()
+		wErr.Close()
+		wOut.Close()
+		errOut, _ := io.ReadAll(rErr)
+		stdOut, _ := io.ReadAll(rOut)
 		os.Stderr = origStderr
 		os.Stdout = origStdout
-	}()
+		outStr := string(errOut) + string(stdOut)
+		if err == nil {
+			t.Errorf("expected error for invalid flag, got nil")
+		}
+		if !strings.Contains(outStr, "flag provided but not defined") && !strings.Contains(outStr, "unknown flag") && !strings.Contains(outStr, "Unknown command:") {
+			t.Errorf("expected flag error, got: %s", outStr)
+		}
+	})
 
-	err := cli.RunCLI()
-	// Give the flag package a moment to flush output
-	time.Sleep(10 * time.Millisecond)
-	_ = wErr.Sync()
-	_ = wOut.Sync()
-	wErr.Close()
-	wOut.Close()
-	errOut, _ := io.ReadAll(rErr)
-	stdOut, _ := io.ReadAll(rOut)
-	os.Stderr = origStderr
-	os.Stdout = origStdout
-	outStr := string(errOut) + string(stdOut)
-	if err == nil {
-		t.Errorf("expected error for invalid flag, got nil")
-	}
-	if !strings.Contains(outStr, "flag provided but not defined") && !strings.Contains(outStr, "unknown flag") && !strings.Contains(outStr, "Unknown command:") {
-		t.Errorf("expected flag error, got: %s", outStr)
-	}
+	t.Run("RunCLI does not print usage in test context", func(t *testing.T) {
+		origArgs := os.Args
+		os.Args = []string{"/tmp/go-build-testbin.test"}
+		defer func() { os.Args = origArgs }()
+		if err := cli.RunCLI(); err != nil {
+			t.Errorf("RunCLI() returned error in test context: %v", err)
+		}
+	})
+
+	t.Run("RunCLI returns error and usage for no args in CLI", func(t *testing.T) {
+		origArgs := os.Args
+		origStderr := os.Stderr
+		r, w, _ := os.Pipe()
+		os.Stderr = w
+		os.Args = []string{"getmssql"}
+		defer func() {
+			os.Args = origArgs
+			os.Stderr = origStderr
+		}()
+		err := cli.RunCLI()
+		w.Close()
+		out, _ := io.ReadAll(r)
+		if err == nil {
+			t.Errorf("expected error for no command, got nil")
+		}
+		if !strings.Contains(string(out), "Usage:") {
+			t.Errorf("expected usage output for no command, got: %s", string(out))
+		}
+	})
 }
