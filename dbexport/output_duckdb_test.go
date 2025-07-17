@@ -10,7 +10,7 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 )
 
-func TestWriteDuckDBWithDeps_Errors(t *testing.T) {
+func TestWriteDuckDBWithDeps_Errors2(t *testing.T) {
 	columns := []string{"a"}
 	now := time.Now()
 
@@ -222,7 +222,7 @@ func TestWriteDuckDBWithDeps_Errors(t *testing.T) {
 	}
 }
 
-func TestWriteDuckDB_ErrorAndSuccess(t *testing.T) {
+func TestWriteDuckDB_ErrorAndSuccess2(t *testing.T) {
 	// Error path: nil rows should error
 	err := WriteDuckDBWithDeps(nil, []string{"a"}, "table", time.Now(), nil, nil)
 	if err == nil {
