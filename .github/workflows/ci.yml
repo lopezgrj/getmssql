@@ -31,7 +31,18 @@ jobs:
         run: go vet ./...
 
       - name: Check formatting
-        run: test -z "$(gofmt -l .)"
+        run: |
+          fmtres=$(gofmt -l .)
+          if [ -n "$fmtres" ]; then
+            echo "The following files are not gofmt'd:"
+            echo "$fmtres"
+            exit 1
+          fi
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v4
+        with:
+          version: v1.56.2
 
       - name: Check for outdated dependencies
         run: go list -u -m -mod=readonly all
@@ -47,12 +58,23 @@ jobs:
         shell: bash
         # Fails if go.mod or go.sum are not tidy
 
+      - name: Run tests with coverage
+        run: go test -coverprofile=coverage.out ./...
 
-      - name: Run tests
-        run: go test -v ./...
-
-      - name: Run staticcheck (optional)
-        uses: dominikh/staticcheck-action@v1
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
         with:
-          version: "2023.1.3"
-        continue-on-error: true
+          name: coverage-report
+          path: coverage.out
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+     
