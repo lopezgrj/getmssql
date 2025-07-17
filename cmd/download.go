@@ -25,7 +25,12 @@ var downloadCmd = &cobra.Command{
 		asCSV := downloadFormat == "csv"
 		asSQLite := downloadFormat == "sqlite3"
 		asDuckDB := downloadFormat == "duckdb"
+		asParquet := downloadFormat == "parquet"
 		return withDB(downloadDatabase, func(ctx context.Context, db *sql.DB) error {
+			// Add support for parquet format
+			if asParquet {
+				return dbexport.DownloadTableParquet(db, table, downloadFields)
+			}
 			err := dbexport.DownloadTable(db, table, downloadFields, asTSV, asCSV, asSQLite, asDuckDB)
 			if err != nil {
 				if isInvalidTableError(err) {
@@ -39,7 +44,7 @@ var downloadCmd = &cobra.Command{
 
 func init() {
 	downloadCmd.Flags().StringVar(&downloadFields, "fields", "", "Comma-separated list of fields to export (optional)")
-	downloadCmd.Flags().StringVar(&downloadFormat, "format", "json", "Export format: json, tsv, csv, sqlite3, duckdb")
+	downloadCmd.Flags().StringVar(&downloadFormat, "format", "json", "Export format: json, tsv, csv, sqlite3, duckdb, parquet")
 	downloadCmd.Flags().StringVar(&downloadDatabase, "database", "", "MSSQL database name (env: MSSQL_DATABASE)")
 	rootCmd.AddCommand(downloadCmd)
 }
