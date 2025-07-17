@@ -49,10 +49,14 @@ jobs:
             exit 1
           fi
 
+      - name: Clean Go build cache
+        run: go clean -cache -modcache
+
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v4
         with:
           version: v1.56.2
+          args: --tests
 
       - name: Check for outdated dependencies
         run: go list -u -m -mod=readonly all
