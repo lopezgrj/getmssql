@@ -38,4 +38,5 @@ Thumbs.db
 *.sqlite3-journal
 *.duckdb
 getmssql
+coverage.*
 
