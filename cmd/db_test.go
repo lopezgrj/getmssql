@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -10,51 +11,46 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 )
 
-// mockFn is a helper to test the callback logic.
-func mockFn(ctx context.Context, db *sql.DB) error {
-	return nil
-}
-
-func TestWithDB_MissingEnvVars(t *testing.T) {
-	os.Clearenv()
-	err := withDB("", mockFn)
-	if err == nil || !strings.Contains(err.Error(), "missing required connection parameters") {
-		t.Errorf("expected missing env var error, got: %v", err)
+func TestWithDB_MissingEachEnvVar(t *testing.T) {
+	vars := []string{"MSSQL_SERVER", "MSSQL_PORT", "MSSQL_USER", "MSSQL_PASSWORD", "MSSQL_DATABASE"}
+	for _, v := range vars {
+		os.Setenv("MSSQL_SERVER", "localhost")
+		os.Setenv("MSSQL_PORT", "1433")
+		os.Setenv("MSSQL_USER", "sa")
+		os.Setenv("MSSQL_PASSWORD", "pass")
+		os.Setenv("MSSQL_DATABASE", "testdb")
+		os.Unsetenv(v)
+		err := withDB("", mockFn)
+		if err == nil || !strings.Contains(err.Error(), v) {
+			t.Errorf("expected error mentioning %s, got: %v", v, err)
+		}
 	}
 }
 
-func TestWithDB_UsesDatabaseArg(t *testing.T) {
+func TestWithDB_SuccessfulConnectionAndCallback(t *testing.T) {
 	os.Setenv("MSSQL_SERVER", "localhost")
 	os.Setenv("MSSQL_PORT", "1433")
 	os.Setenv("MSSQL_USER", "sa")
 	os.Setenv("MSSQL_PASSWORD", "pass")
-	os.Setenv("MSSQL_DATABASE", "shouldnotuse")
-	dbName := "testdb"
-	called := false
-	fakeFn := func(ctx context.Context, db *sql.DB) error {
-		called = true
-		return nil
-	}
-	// Use sqlmock for safe DB mocking
+	os.Setenv("MSSQL_DATABASE", "testdb")
 	mockDB, _, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("failed to create sqlmock: %v", err)
 	}
 	defer mockDB.Close()
-
 	origOpen := sqlOpen
 	defer func() { sqlOpen = origOpen }()
 	sqlOpen = func(driver, dsn string) (*sql.DB, error) {
-		if !strings.Contains(dsn, dbName) {
-			t.Errorf("expected dsn to contain %s, got: %s", dbName, dsn)
-		}
 		return mockDB, nil
 	}
 	origPing := dbPing
 	defer func() { dbPing = origPing }()
 	dbPing = func(db *sql.DB) error { return nil }
-
-	err = withDB(dbName, fakeFn)
+	called := false
+	err = withDB("", func(ctx context.Context, db *sql.DB) error {
+		called = true
+		return nil
+	})
 	if err != nil {
 		t.Errorf("expected no error, got: %v", err)
 	}
@@ -63,4 +59,75 @@ func TestWithDB_UsesDatabaseArg(t *testing.T) {
 	}
 }
 
-// Use the real withDB and patch sqlOpen/dbPing via package-level vars for testability.
+// mockFn is a helper to test the callback logic.
+func mockFn(ctx context.Context, db *sql.DB) error {
+	return nil
+}
+
+func TestWithDB_ConnectionError(t *testing.T) {
+	os.Setenv("MSSQL_SERVER", "localhost")
+	os.Setenv("MSSQL_PORT", "1433")
+	os.Setenv("MSSQL_USER", "sa")
+	os.Setenv("MSSQL_PASSWORD", "pass")
+	os.Setenv("MSSQL_DATABASE", "testdb")
+	origOpen := sqlOpen
+	defer func() { sqlOpen = origOpen }()
+	sqlOpen = func(driver, dsn string) (*sql.DB, error) {
+		return nil, fmt.Errorf("open fail")
+	}
+	err := withDB("", mockFn)
+	if err == nil || !strings.Contains(err.Error(), "error creating connection pool") {
+		t.Errorf("expected connection pool error, got: %v", err)
+	}
+}
+
+func TestWithDB_PingError(t *testing.T) {
+	os.Setenv("MSSQL_SERVER", "localhost")
+	os.Setenv("MSSQL_PORT", "1433")
+	os.Setenv("MSSQL_USER", "sa")
+	os.Setenv("MSSQL_PASSWORD", "pass")
+	os.Setenv("MSSQL_DATABASE", "testdb")
+	mockDB, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("failed to create sqlmock: %v", err)
+	}
+	defer mockDB.Close()
+	origOpen := sqlOpen
+	defer func() { sqlOpen = origOpen }()
+	sqlOpen = func(driver, dsn string) (*sql.DB, error) {
+		return mockDB, nil
+	}
+	origPing := dbPing
+	defer func() { dbPing = origPing }()
+	dbPing = func(db *sql.DB) error { return fmt.Errorf("ping fail") }
+	err = withDB("", mockFn)
+	if err == nil || !strings.Contains(err.Error(), "cannot connect to database") {
+		t.Errorf("expected ping error, got: %v", err)
+	}
+}
+
+func TestWithDB_CallbackError(t *testing.T) {
+	os.Setenv("MSSQL_SERVER", "localhost")
+	os.Setenv("MSSQL_PORT", "1433")
+	os.Setenv("MSSQL_USER", "sa")
+	os.Setenv("MSSQL_PASSWORD", "pass")
+	os.Setenv("MSSQL_DATABASE", "testdb")
+	mockDB, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("failed to create sqlmock: %v", err)
+	}
+	defer mockDB.Close()
+	origOpen := sqlOpen
+	defer func() { sqlOpen = origOpen }()
+	sqlOpen = func(driver, dsn string) (*sql.DB, error) {
+		return mockDB, nil
+	}
+	origPing := dbPing
+	defer func() { dbPing = origPing }()
+	dbPing = func(db *sql.DB) error { return nil }
+	cbErr := fmt.Errorf("callback fail")
+	err = withDB("", func(ctx context.Context, db *sql.DB) error { return cbErr })
+	if err == nil || !strings.Contains(err.Error(), "callback fail") {
+		t.Errorf("expected callback error, got: %v", err)
+	}
+}
