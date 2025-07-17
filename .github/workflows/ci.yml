@@ -59,13 +59,13 @@ jobs:
         # Fails if go.mod or go.sum are not tidy
 
       - name: Run tests with coverage
-        run: go test -coverprofile=coverage.out ./...
+        run: go test -coverprofile=coverage.txt ./...
 
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v4
         with:
           name: coverage-report
-          path: coverage.out
+          path: coverage.txt
 
       - name: Cache Go modules
         uses: actions/cache@v4
@@ -77,4 +77,8 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-go-
 
-     
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: lopezgrj/getmssql
