@@ -1,3 +1,16 @@
+// Package cmd contains the command-line interface logic for the getmssql tool.
+//
+// This file provides helpers for establishing and managing database connections
+// and context/signal handling for CLI commands that interact with SQL Server.
+//
+// Environment variables required for connection:
+//   - MSSQL_SERVER:   SQL Server hostname or IP
+//   - MSSQL_PORT:     SQL Server port
+//   - MSSQL_USER:     SQL Server username
+//   - MSSQL_PASSWORD: SQL Server password
+//   - MSSQL_DATABASE: Database name (can be overridden per call)
+//
+// Optionally, a .env file can be used for local development.
 package cmd
 
 import (
@@ -12,7 +25,18 @@ import (
 	"github.com/joho/godotenv"
 )
 
-// withDB handles DB connection, context, signal handling, and cleanup. It calls fn with the DB and context.
+// withDB establishes a connection to the SQL Server database, sets up context and signal handling,
+// and ensures proper cleanup. It loads environment variables (optionally from a .env file),
+// validates required parameters, and calls the provided function with a live DB connection and context.
+//
+// Usage:
+//
+//	err := withDB("", func(ctx context.Context, db *sql.DB) error {
+//	    // use db here
+//	    return nil
+//	})
+//
+// If any required environment variable is missing or the connection fails, an error is returned.
 func withDB(database string, fn func(ctx context.Context, db *sql.DB) error) error {
 	_ = godotenv.Load()
 	server := os.Getenv("MSSQL_SERVER")
