@@ -8,19 +8,33 @@ import (
 
 // WriteSQLite writes table data to a SQLite3 database file.
 func WriteSQLite(rows Rows, columns []string, table string, now time.Time) error {
+	// Defensive checks for nil rows and columns
+	if rows == nil {
+		return fmt.Errorf("rows is nil")
+	}
+	if columns == nil || len(columns) == 0 {
+		return fmt.Errorf("columns is nil or empty")
+	}
 	return WriteSQLiteWithDeps(rows, columns, table, now)
 }
 
 // WriteSQLiteWithDeps writes table data to a SQLite3 database file (for testability).
 func WriteSQLiteWithDeps(rows Rows, cols []string, table string, start time.Time) error {
+	// Defensive checks for nil rows and columns
 	if rows == nil {
 		return fmt.Errorf("rows is nil")
+	}
+	if cols == nil || len(cols) == 0 {
+		return fmt.Errorf("columns is nil or empty")
 	}
 	dbFile := "output.sqlite3"
 	tableLower := strings.ToLower(table)
 	sqliteDB, err := openSQLite("sqlite3", dbFile)
 	if err != nil {
 		return fmt.Errorf("error opening SQLite3 database: %w", err)
+	}
+	if sqliteDB == nil {
+		return fmt.Errorf("openSQLite returned nil *sql.DB without error")
 	}
 	defer sqliteDB.Close()
 

@@ -30,27 +30,6 @@ func TestWriteSQLite_ErrorAndSuccess(t *testing.T) {
 		db, mock, err := sqlmock.New()
 		if err != nil {
 			t.Fatalf("failed to open sqlmock: %v", err)
-			openSQLite = func(driver, dsn string) (*sql.DB, error) {
-				return db, nil
-			}
-			scanln = func(a ...interface{}) (int, error) {
-				if len(a) > 0 {
-					if s, ok := a[0].(*string); ok {
-						*s = "n"
-					}
-				}
-				return 1, nil
-			}
-			mock.ExpectQuery(`SELECT count\(\*\) FROM sqlite_master WHERE type='table' AND name='table'`).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
-			err = WriteSQLite(nil, []string{"a"}, "table", time.Now())
-			if err == nil || !strings.Contains(err.Error(), "rows is nil") {
-				t.Errorf("expected 'rows is nil' error for nil rows, got: %v", err)
-			}
-		}
-
-		// Success path: table does not exist, create and insert
-		if err != nil {
-			t.Fatalf("failed to open sqlmock: %v", err)
 		}
 		defer db.Close()
 		openSQLite = func(driver, dsn string) (*sql.DB, error) {
@@ -59,16 +38,12 @@ func TestWriteSQLite_ErrorAndSuccess(t *testing.T) {
 		scanln = func(a ...interface{}) (int, error) {
 			if len(a) > 0 {
 				if s, ok := a[0].(*string); ok {
-					*s = "y"
+					*s = "n"
 				}
 			}
 			return 1, nil
 		}
-		mock.ExpectQuery(`SELECT count\(\*\) FROM sqlite_master WHERE type='table' AND name='table'`).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
-		mock.ExpectExec(`CREATE TABLE IF NOT EXISTS`).WillReturnResult(sqlmock.NewResult(0, 1))
-		mock.ExpectBegin()
-		mock.ExpectPrepare(`INSERT INTO`).ExpectExec().WithArgs("foo").WillReturnResult(sqlmock.NewResult(1, 1))
-		mock.ExpectCommit()
+		mock.ExpectQuery(`SELECT count\(\*\) FROM sqlite_master WHERE type='table' AND name='table'`).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 
 		// Use a real in-memory SQLite DB to create *sql.Rows for data
 		sqlite, err := sql.Open("sqlite3", ":memory:")
@@ -92,7 +67,7 @@ func TestWriteSQLite_ErrorAndSuccess(t *testing.T) {
 
 		err = WriteSQLite(sqlRows, []string{"a"}, "table", time.Now())
 		if err != nil {
-			t.Errorf("expected success, got: %v", err)
+			t.Errorf("expected nil for user abort, got: %v", err)
 		}
 	}
 
@@ -398,4 +373,223 @@ func TestWriteSQLite_ErrorAndPrompt(t *testing.T) {
 	}
 	// This will hit the user abort path (tableExists > 0 must be simulated by further refactor)
 	// For now, just ensure the prompt logic is exercised
+}
+
+func TestWriteSQLiteWithDeps_UserAbort(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("failed to open sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	// Table exists
+	mock.ExpectQuery(`SELECT count\(\*\) FROM sqlite_master WHERE type='table' AND name='table'`).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+
+	// Simulate user abort
+	origOpenSQLite := openSQLite
+	origScanln := scanln
+	openSQLite = func(driver, dsn string) (*sql.DB, error) { return db, nil }
+	scanln = func(a ...interface{}) (int, error) {
+		if len(a) > 0 {
+			if s, ok := a[0].(*string); ok {
+				*s = "n"
+			}
+		}
+		return 1, nil
+	}
+	defer func() { openSQLite = origOpenSQLite; scanln = origScanln }()
+
+	// Use a real in-memory SQLite DB to create *sql.Rows for data
+	sqlite, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("failed to open sqlite3: %v", err)
+	}
+	defer sqlite.Close()
+	_, err = sqlite.Exec("CREATE TABLE sometable (a TEXT)")
+	if err != nil {
+		t.Fatalf("failed to create table: %v", err)
+	}
+	_, err = sqlite.Exec("INSERT INTO sometable (a) VALUES ('foo')")
+	if err != nil {
+		t.Fatalf("failed to insert row: %v", err)
+	}
+	sqlRows, err := sqlite.Query("SELECT a FROM sometable")
+	if err != nil {
+		t.Fatalf("failed to create sql.Rows: %v", err)
+	}
+	defer sqlRows.Close()
+
+	err = WriteSQLiteWithDeps(sqlRows, []string{"a"}, "table", time.Now())
+	if err != nil {
+		t.Errorf("expected nil for user abort, got: %v", err)
+	}
+}
+
+func TestWriteSQLiteWithDeps_BatchInsert(t *testing.T) {
+	// This test inserts >10,000 rows to exercise batch commit logic
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("failed to open sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	columns := []string{"a"}
+
+	// Table does not exist
+	mock.ExpectQuery(`SELECT count\(\*\) FROM sqlite_master WHERE type='table' AND name='table'`).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectExec(`CREATE TABLE IF NOT EXISTS`).WillReturnResult(sqlmock.NewResult(0, 1))
+	// For 10,001 rows, expect 2 commits (10,000 + 1)
+	mock.ExpectBegin()
+	mock.ExpectPrepare(`INSERT INTO`)
+	for i := 0; i < 10000; i++ {
+		mock.ExpectExec(`INSERT INTO`).WithArgs(fmt.Sprintf("row%d", i)).WillReturnResult(sqlmock.NewResult(1, 1))
+	}
+	mock.ExpectCommit()
+	// Final batch (1 row)
+	mock.ExpectBegin()
+	mock.ExpectPrepare(`INSERT INTO`)
+	mock.ExpectExec(`INSERT INTO`).WithArgs("row10000").WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	// Use a real SQLite DB to generate *sql.Rows with 10,001 rows
+	sqlite, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("failed to open sqlite3: %v", err)
+	}
+	defer sqlite.Close()
+	_, err = sqlite.Exec("CREATE TABLE sometable (a TEXT)")
+	if err != nil {
+		t.Fatalf("failed to create table: %v", err)
+	}
+	for i := 0; i < 10001; i++ {
+		_, err = sqlite.Exec("INSERT INTO sometable (a) VALUES (?)", fmt.Sprintf("row%d", i))
+		if err != nil {
+			t.Fatalf("failed to insert row %d: %v", i, err)
+		}
+	}
+	sqlRows, err := sqlite.Query("SELECT a FROM sometable")
+	if err != nil {
+		t.Fatalf("failed to create sql.Rows: %v", err)
+	}
+	defer sqlRows.Close()
+
+	origOpenSQLite := openSQLite
+	openSQLite = func(driver, dsn string) (*sql.DB, error) {
+		return db, nil
+	}
+	defer func() { openSQLite = origOpenSQLite }()
+
+	err = WriteSQLiteWithDeps(sqlRows, columns, "table", time.Now())
+	if err != nil {
+		t.Errorf("expected success for >10,000 rows, got: %v", err)
+	}
+}
+
+func TestWriteSQLiteWithDeps_BatchCommitError(t *testing.T) {
+	// Simulate error on tx.Commit() after a batch
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("failed to open sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	columns := []string{"a"}
+
+	mock.ExpectQuery(`SELECT count\(\*\) FROM sqlite_master WHERE type='table' AND name='table'`).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectExec(`CREATE TABLE IF NOT EXISTS`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectBegin()
+	mock.ExpectPrepare(`INSERT INTO`)
+	for i := 0; i < 10000; i++ {
+		mock.ExpectExec(`INSERT INTO`).WithArgs(fmt.Sprintf("row%d", i)).WillReturnResult(sqlmock.NewResult(1, 1))
+	}
+	mock.ExpectCommit().WillReturnError(fmt.Errorf("batch commit error"))
+
+	// Use a real SQLite DB to generate *sql.Rows with 10,000 rows
+	sqlite, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("failed to open sqlite3: %v", err)
+	}
+	defer sqlite.Close()
+	_, err = sqlite.Exec("CREATE TABLE sometable (a TEXT)")
+	if err != nil {
+		t.Fatalf("failed to create table: %v", err)
+	}
+	for i := 0; i < 10000; i++ {
+		_, err = sqlite.Exec("INSERT INTO sometable (a) VALUES (?)", fmt.Sprintf("row%d", i))
+		if err != nil {
+			t.Fatalf("failed to insert row %d: %v", i, err)
+		}
+	}
+	sqlRows, err := sqlite.Query("SELECT a FROM sometable")
+	if err != nil {
+		t.Fatalf("failed to create sql.Rows: %v", err)
+	}
+	defer sqlRows.Close()
+
+	origOpenSQLite := openSQLite
+	openSQLite = func(driver, dsn string) (*sql.DB, error) {
+		return db, nil
+	}
+	defer func() { openSQLite = origOpenSQLite }()
+
+	err = WriteSQLiteWithDeps(sqlRows, columns, "table", time.Now())
+	if err == nil || !strings.Contains(err.Error(), "batch commit error") {
+		t.Errorf("expected batch commit error, got: %v", err)
+	}
+}
+
+func TestWriteSQLiteWithDeps_BatchPrepareError(t *testing.T) {
+	// Simulate error on tx.Prepare() after a batch
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("failed to open sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	columns := []string{"a"}
+
+	mock.ExpectQuery(`SELECT count\(\*\) FROM sqlite_master WHERE type='table' AND name='table'`).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectExec(`CREATE TABLE IF NOT EXISTS`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectBegin()
+	mock.ExpectPrepare(`INSERT INTO`)
+	for i := 0; i < 10000; i++ {
+		mock.ExpectExec(`INSERT INTO`).WithArgs(fmt.Sprintf("row%d", i)).WillReturnResult(sqlmock.NewResult(1, 1))
+	}
+	mock.ExpectCommit()
+	// Next batch: begin, prepare fails
+	mock.ExpectBegin()
+	mock.ExpectPrepare(`INSERT INTO`).WillReturnError(fmt.Errorf("batch prepare error"))
+
+	// Use a real SQLite DB to generate *sql.Rows with 10,001 rows
+	sqlite, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("failed to open sqlite3: %v", err)
+	}
+	defer sqlite.Close()
+	_, err = sqlite.Exec("CREATE TABLE sometable (a TEXT)")
+	if err != nil {
+		t.Fatalf("failed to create table: %v", err)
+	}
+	for i := 0; i < 10001; i++ {
+		_, err = sqlite.Exec("INSERT INTO sometable (a) VALUES (?)", fmt.Sprintf("row%d", i))
+		if err != nil {
+			t.Fatalf("failed to insert row %d: %v", i, err)
+		}
+	}
+	sqlRows, err := sqlite.Query("SELECT a FROM sometable")
+	if err != nil {
+		t.Fatalf("failed to create sql.Rows: %v", err)
+	}
+	defer sqlRows.Close()
+
+	origOpenSQLite := openSQLite
+	openSQLite = func(driver, dsn string) (*sql.DB, error) {
+		return db, nil
+	}
+	defer func() { openSQLite = origOpenSQLite }()
+
+	err = WriteSQLiteWithDeps(sqlRows, columns, "table", time.Now())
+	if err == nil || !strings.Contains(err.Error(), "batch prepare error") {
+		t.Errorf("expected batch prepare error, got: %v", err)
+	}
 }

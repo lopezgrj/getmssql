@@ -385,3 +385,229 @@ func TestWriteDuckDBRows_Minimal(t *testing.T) {
 		t.Errorf("expected success, got: %v", err)
 	}
 }
+
+func TestWriteDuckDBRows_BatchInsert(t *testing.T) {
+	// This test inserts >10,000 rows to exercise batch commit logic
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("failed to open sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	columns := []string{"a"}
+
+	// Expect table check, create, begin, prepare, and multiple exec/commit for batches
+	mock.ExpectQuery(`SELECT count\(\*\) FROM information_schema.tables WHERE table_name='table'`).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectExec(`CREATE TABLE IF NOT EXISTS`).WillReturnResult(sqlmock.NewResult(0, 1))
+	// For 10,001 rows, expect 2 commits (10,000 + 1)
+	mock.ExpectBegin()
+	mock.ExpectPrepare(`INSERT INTO`)
+	for i := 0; i < 10000; i++ {
+		mock.ExpectExec(`INSERT INTO`).WithArgs(fmt.Sprintf("row%d", i)).WillReturnResult(sqlmock.NewResult(1, 1))
+	}
+	mock.ExpectCommit()
+	// Final batch (1 row)
+	mock.ExpectBegin()
+	mock.ExpectPrepare(`INSERT INTO`)
+	mock.ExpectExec(`INSERT INTO`).WithArgs("row10000").WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	// Use a real SQLite DB to generate *sql.Rows with 10,001 rows
+	sqlite, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("failed to open sqlite3: %v", err)
+	}
+	defer sqlite.Close()
+	_, err = sqlite.Exec("CREATE TABLE sometable (a TEXT)")
+	if err != nil {
+		t.Fatalf("failed to create table: %v", err)
+	}
+	for i := 0; i < 10001; i++ {
+		_, err = sqlite.Exec("INSERT INTO sometable (a) VALUES (?)", fmt.Sprintf("row%d", i))
+		if err != nil {
+			t.Fatalf("failed to insert row %d: %v", i, err)
+		}
+	}
+	sqlRows, err := sqlite.Query("SELECT a FROM sometable")
+	if err != nil {
+		t.Fatalf("failed to create sql.Rows: %v", err)
+	}
+	defer sqlRows.Close()
+
+	// Patch openDuckDB and scanln for the wrapper
+	origOpenDuckDB := openDuckDB
+	origScanln := scanln
+	openDuckDB = func(driver, dsn string) (*sql.DB, error) {
+		return db, nil
+	}
+	scanln = func(a ...interface{}) (int, error) { return 1, nil }
+	defer func() { openDuckDB = origOpenDuckDB; scanln = origScanln }()
+
+	err = WriteDuckDBRows(sqlRows, columns, "table", time.Now())
+	if err != nil {
+		t.Errorf("expected success for >10,000 rows, got: %v", err)
+	}
+}
+
+func TestWriteDuckDBRows_BatchCommitError(t *testing.T) {
+	// Simulate error on tx.Commit() after a batch
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("failed to open sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	columns := []string{"a"}
+
+	mock.ExpectQuery(`SELECT count\(\*\) FROM information_schema.tables WHERE table_name='table'`).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectExec(`CREATE TABLE IF NOT EXISTS`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectBegin()
+	mock.ExpectPrepare(`INSERT INTO`)
+	for i := 0; i < 10000; i++ {
+		mock.ExpectExec(`INSERT INTO`).WithArgs(fmt.Sprintf("row%d", i)).WillReturnResult(sqlmock.NewResult(1, 1))
+	}
+	mock.ExpectCommit().WillReturnError(fmt.Errorf("batch commit error"))
+
+	// Use a real SQLite DB to generate *sql.Rows with 10,000 rows
+	sqlite, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("failed to open sqlite3: %v", err)
+	}
+	defer sqlite.Close()
+	_, err = sqlite.Exec("CREATE TABLE sometable (a TEXT)")
+	if err != nil {
+		t.Fatalf("failed to create table: %v", err)
+	}
+	for i := 0; i < 10000; i++ {
+		_, err = sqlite.Exec("INSERT INTO sometable (a) VALUES (?)", fmt.Sprintf("row%d", i))
+		if err != nil {
+			t.Fatalf("failed to insert row %d: %v", i, err)
+		}
+	}
+	sqlRows, err := sqlite.Query("SELECT a FROM sometable")
+	if err != nil {
+		t.Fatalf("failed to create sql.Rows: %v", err)
+	}
+	defer sqlRows.Close()
+
+	origOpenDuckDB := openDuckDB
+	origScanln := scanln
+	openDuckDB = func(driver, dsn string) (*sql.DB, error) {
+		return db, nil
+	}
+	scanln = func(a ...interface{}) (int, error) { return 1, nil }
+	defer func() { openDuckDB = origOpenDuckDB; scanln = origScanln }()
+
+	err = WriteDuckDBRows(sqlRows, columns, "table", time.Now())
+	if err == nil || !strings.Contains(err.Error(), "batch commit error") {
+		t.Errorf("expected batch commit error, got: %v", err)
+	}
+}
+
+func TestWriteDuckDBRows_BatchPrepareError(t *testing.T) {
+	// Simulate error on tx.Prepare() after a batch
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("failed to open sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	columns := []string{"a"}
+
+	mock.ExpectQuery(`SELECT count\(\*\) FROM information_schema.tables WHERE table_name='table'`).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectExec(`CREATE TABLE IF NOT EXISTS`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectBegin()
+	mock.ExpectPrepare(`INSERT INTO`)
+	for i := 0; i < 10000; i++ {
+		mock.ExpectExec(`INSERT INTO`).WithArgs(fmt.Sprintf("row%d", i)).WillReturnResult(sqlmock.NewResult(1, 1))
+	}
+	mock.ExpectCommit()
+	// Next batch: begin, prepare fails
+	mock.ExpectBegin()
+	mock.ExpectPrepare(`INSERT INTO`).WillReturnError(fmt.Errorf("batch prepare error"))
+
+	// Use a real SQLite DB to generate *sql.Rows with 10,001 rows
+	sqlite, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("failed to open sqlite3: %v", err)
+	}
+	defer sqlite.Close()
+	_, err = sqlite.Exec("CREATE TABLE sometable (a TEXT)")
+	if err != nil {
+		t.Fatalf("failed to create table: %v", err)
+	}
+	for i := 0; i < 10001; i++ {
+		_, err = sqlite.Exec("INSERT INTO sometable (a) VALUES (?)", fmt.Sprintf("row%d", i))
+		if err != nil {
+			t.Fatalf("failed to insert row %d: %v", i, err)
+		}
+	}
+	sqlRows, err := sqlite.Query("SELECT a FROM sometable")
+	if err != nil {
+		t.Fatalf("failed to create sql.Rows: %v", err)
+	}
+	defer sqlRows.Close()
+
+	origOpenDuckDB := openDuckDB
+	origScanln := scanln
+	openDuckDB = func(driver, dsn string) (*sql.DB, error) {
+		return db, nil
+	}
+	scanln = func(a ...interface{}) (int, error) { return 1, nil }
+	defer func() { openDuckDB = origOpenDuckDB; scanln = origScanln }()
+
+	err = WriteDuckDBRows(sqlRows, columns, "table", time.Now())
+	if err == nil || !strings.Contains(err.Error(), "batch prepare error") {
+		t.Errorf("expected batch prepare error, got: %v", err)
+	}
+}
+
+func TestWriteDuckDBRows_RowsErr(t *testing.T) {
+	// Simulate error on rows.Err() after iteration
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("failed to open sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	columns := []string{"a"}
+
+	mock.ExpectQuery(`SELECT count\(\*\) FROM information_schema.tables WHERE table_name='table'`).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectExec(`CREATE TABLE IF NOT EXISTS`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectBegin()
+	mock.ExpectPrepare(`INSERT INTO`).ExpectExec().WithArgs("foo").WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	// Use a real SQLite DB to generate *sql.Rows, but close early to simulate rows.Err
+	sqlite, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("failed to open sqlite3: %v", err)
+	}
+	defer sqlite.Close()
+	_, err = sqlite.Exec("CREATE TABLE sometable (a TEXT)")
+	if err != nil {
+		t.Fatalf("failed to create table: %v", err)
+	}
+	_, err = sqlite.Exec("INSERT INTO sometable (a) VALUES ('foo')")
+	if err != nil {
+		t.Fatalf("failed to insert row: %v", err)
+	}
+	sqlRows, err := sqlite.Query("SELECT a FROM sometable")
+	if err != nil {
+		t.Fatalf("failed to create sql.Rows: %v", err)
+	}
+	sqlRows.Close() // force error on rows.Err()
+
+	origOpenDuckDB := openDuckDB
+	origScanln := scanln
+	openDuckDB = func(driver, dsn string) (*sql.DB, error) {
+		return db, nil
+	}
+	scanln = func(a ...interface{}) (int, error) { return 1, nil }
+	defer func() { openDuckDB = origOpenDuckDB; scanln = origScanln }()
+
+	err = WriteDuckDBRows(sqlRows, columns, "table", time.Now())
+	if err == nil {
+		t.Errorf("expected error from rows.Err, got: %v", err)
+	}
+}
