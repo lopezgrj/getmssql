@@ -1,4 +1,8 @@
 
+
+![Go CI](https://github.com/lopezgrj/getmssql/actions/workflows/ci.yml/badge.svg)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 # getmssql
 
 
