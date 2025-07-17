@@ -1,9 +1,13 @@
 package dbexport
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
+	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -18,6 +22,9 @@ func WriteDuckDBRows(rows Rows, cols []string, table string, start time.Time) er
 
 // WriteDuckDBWithDeps allows dependency injection for testing.
 func WriteDuckDBWithDeps(rows *sql.Rows, cols []string, table string, start time.Time, openDB func(string, string) (*sql.DB, error), scanlnFn func(...interface{}) (int, error)) error {
+	// Set up context that cancels on SIGINT (Ctrl-C)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	if rows == nil {
 		return fmt.Errorf("rows is nil")
 	}
@@ -77,6 +84,12 @@ func WriteDuckDBWithDeps(rows *sql.Rows, cols []string, table string, start time
 	}
 	defer stmt.Close()
 	for rows.Next() {
+		select {
+		case <-ctx.Done():
+			fmt.Println("\nAborted by user (Ctrl-C)")
+			return fmt.Errorf("aborted by user (Ctrl-C)")
+		default:
+		}
 		vals := ScanRowValues(rows, cols)
 		if _, err := stmt.Exec(vals...); err != nil {
 			return fmt.Errorf("error inserting row into DuckDB: %w", err)

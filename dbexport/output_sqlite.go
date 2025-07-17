@@ -1,8 +1,12 @@
 package dbexport
 
 import (
+	"context"
 	"fmt"
+	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -20,6 +24,15 @@ func WriteSQLite(rows Rows, columns []string, table string, now time.Time) error
 
 // WriteSQLiteWithDeps writes table data to a SQLite3 database file (for testability).
 func WriteSQLiteWithDeps(rows Rows, cols []string, table string, start time.Time) error {
+	// Defensive: ensure all column names are non-empty
+	for i, col := range cols {
+		if col == "" {
+			return fmt.Errorf("column name at index %d is empty", i)
+		}
+	}
+	// Set up context that cancels on SIGINT (Ctrl-C)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	// Defensive checks for nil rows and columns
 	if rows == nil {
 		return fmt.Errorf("rows is nil")
@@ -87,6 +100,12 @@ func WriteSQLiteWithDeps(rows Rows, cols []string, table string, start time.Time
 	}
 	defer stmt.Close()
 	for rows.Next() {
+		select {
+		case <-ctx.Done():
+			fmt.Println("\nAborted by user (Ctrl-C)")
+			return fmt.Errorf("aborted by user (Ctrl-C)")
+		default:
+		}
 		vals := ScanRowValues(rows, cols)
 		if _, err := stmt.Exec(vals...); err != nil {
 			return fmt.Errorf("error inserting row into SQLite3: %w", err)
