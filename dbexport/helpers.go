@@ -8,7 +8,7 @@ import (
 )
 
 // ScanRowValues scans a row into a slice of values, converting types as needed.
-func ScanRowValues(rows *sql.Rows, cols []string) []interface{} {
+func ScanRowValues(rows Rows, cols []string) []interface{} {
 	columns := make([]interface{}, len(cols))
 	columnPointers := make([]interface{}, len(cols))
 	for i := range columns {

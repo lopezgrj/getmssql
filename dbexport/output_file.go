@@ -89,3 +89,12 @@ func WriteFileOutput(rows *sql.Rows, cols []string, table string, asTSV, asCSV b
 	fmt.Printf("Table '%s' data written to %s in %s\n", table, filename, elapsed)
 	return nil
 }
+
+// WriteFileOutputRows is a wrapper for WriteFileOutput that accepts Rows interface
+func WriteFileOutputRows(rows Rows, cols []string, table string, asTSV, asCSV bool, start time.Time) error {
+	sqlRows, ok := rows.(*sql.Rows)
+	if !ok {
+		return fmt.Errorf("WriteFileOutput requires *sql.Rows")
+	}
+	return WriteFileOutput(sqlRows, cols, table, asTSV, asCSV, start)
+}

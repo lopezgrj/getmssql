@@ -8,9 +8,9 @@ import (
 	"time"
 )
 
-type DuckDBWriter func(rows *sql.Rows, cols []string, table string, start time.Time) error
-type SQLiteWriter func(rows *sql.Rows, cols []string, table string, start time.Time) error
-type FileWriter func(rows *sql.Rows, cols []string, table string, asTSV, asCSV bool, start time.Time) error
+type DuckDBWriter func(rows Rows, cols []string, table string, start time.Time) error
+type SQLiteWriter func(rows Rows, cols []string, table string, start time.Time) error
+type FileWriter func(rows Rows, cols []string, table string, asTSV, asCSV bool, start time.Time) error
 
 // DownloadTableWithWriters allows dependency injection for writer functions (for testing).
 func DownloadTableWithWriters(
@@ -73,7 +73,7 @@ func DownloadTableWithWriters(
 
 // DownloadTable exports a table to the selected format using the default writers.
 func DownloadTable(db *sql.DB, table string, fieldsFile string, asTSV, asCSV, asSQLite, asDuckDB bool) error {
-	return DownloadTableWithWriters(db, table, fieldsFile, asTSV, asCSV, asSQLite, asDuckDB, WriteDuckDB, WriteSQLite, WriteFileOutput)
+	return DownloadTableWithWriters(db, table, fieldsFile, asTSV, asCSV, asSQLite, asDuckDB, WriteDuckDBRows, WriteSQLite, WriteFileOutputRows)
 }
 
 // BuildSelectQuery builds a SELECT query for the given table and optional fields file.
