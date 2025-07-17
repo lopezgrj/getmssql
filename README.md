@@ -2,7 +2,7 @@
 
 ![Go CI](https://github.com/lopezgrj/getmssql/actions/workflows/ci.yml/badge.svg)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![codecov](https://codecov.io/gh/lopezrj/getmssql/branch/main/graph/badge.svg)](https://codecov.io/gh/lopezrj/getmssql)
+[![codecov](https://codecov.io/gh/lopezgrj/getmssql/branch/main/graph/badge.svg)](https://codecov.io/gh/lopezgrj/getmssql)
 
 # getmssql
 
