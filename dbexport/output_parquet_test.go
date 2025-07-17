@@ -1,14 +1,14 @@
 package dbexport
 
 import (
-	   "context"
-	   "database/sql"
-	   "os"
-	   "strings"
-	   "testing"
-	   "time"
+	"context"
+	"database/sql"
+	"os"
+	"strings"
+	"testing"
+	"time"
 
-	   "github.com/DATA-DOG/go-sqlmock"
+	"github.com/DATA-DOG/go-sqlmock"
 )
 
 func TestReadFieldsFile(t *testing.T) {
