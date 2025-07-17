@@ -16,8 +16,8 @@ func WriteSQLite(rows Rows, columns []string, table string, now time.Time) error
 	if rows == nil {
 		return fmt.Errorf("rows is nil")
 	}
-	if columns == nil || len(columns) == 0 {
-		return fmt.Errorf("columns is nil or empty")
+	if len(columns) == 0 {
+		return fmt.Errorf("columns is empty")
 	}
 	return WriteSQLiteWithDeps(rows, columns, table, now)
 }
@@ -37,8 +37,8 @@ func WriteSQLiteWithDeps(rows Rows, cols []string, table string, start time.Time
 	if rows == nil {
 		return fmt.Errorf("rows is nil")
 	}
-	if cols == nil || len(cols) == 0 {
-		return fmt.Errorf("columns is nil or empty")
+	if len(cols) == 0 {
+		return fmt.Errorf("columns is empty")
 	}
 	dbFile := "output.sqlite3"
 	tableLower := strings.ToLower(table)

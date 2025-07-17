@@ -2,7 +2,6 @@ package dbexport
 
 import (
 	"bytes"
-	"database/sql"
 	"fmt"
 	"io"
 	"os"
@@ -85,18 +84,6 @@ func TestWriteFileOutputRows_SuccessAndError(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "requires *sql.Rows") {
 		t.Errorf("expected error for non-*sql.Rows, got: %v", err)
 	}
-}
-
-// errRows wraps sql.Rows and returns a custom error from Err()
-type errRows struct {
-	*sql.Rows
-}
-
-func (e *errRows) Err() error {
-	if e.Rows == nil {
-		return fmt.Errorf("rows error")
-	}
-	return nil
 }
 
 func TestWriteFileOutput_SuccessAndError(t *testing.T) {
