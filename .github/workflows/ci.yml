@@ -21,6 +21,16 @@ jobs:
         with:
           go-version: '1.22'
 
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
       - name: Install dependencies
         run: go mod download
 
@@ -59,26 +69,16 @@ jobs:
         # Fails if go.mod or go.sum are not tidy
 
       - name: Run tests with coverage
-        run: go test -coverprofile=coverage.txt ./...
+        run: go test -coverprofile=coverage.out ./...
 
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v4
         with:
           name: coverage-report
-          path: coverage.txt
-
-      - name: Cache Go modules
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
+          path: coverage.out
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          slug: lopezgrj/getmssql
+          files: coverage.out
+          fail_ci_if_error: false
