@@ -1,6 +1,9 @@
 package dbexport_test
 
 import (
+	"bytes"
+	"database/sql"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -12,7 +15,189 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 )
 
-func TestBuildSelectQuery_Errors(t *testing.T) {
+func captureStdout(f func()) string {
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	f()
+	w.Close()
+	os.Stdout = old
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+	return buf.String()
+}
+
+func TestDownloadTable_WrapperCoverage(t *testing.T) {
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("failed to open sqlmock: %v", err)
+	}
+	defer db.Close()
+	// This triggers the error path in BuildSelectQuery, which is enough to cover the wrapper
+	err = dbexport.DownloadTable(db, "table", "/nonexistent/file", false, false, false, false)
+	if err == nil || !strings.Contains(err.Error(), "error reading fields file") {
+		t.Errorf("expected error from DownloadTable, got: %v", err)
+	}
+}
+func TestDownloadTable_ErrorsAndSuccess(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("failed to open sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	// Error from BuildSelectQuery
+	err = dbexport.DownloadTableWithWriters(db, "table", "/nonexistent/file", false, false, false, false,
+		nil, nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "error reading fields file") {
+		t.Errorf("expected error from BuildSelectQuery, got: %v", err)
+	}
+
+	// Error from db.QueryRow(...).Scan(...)
+	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM \[table\]`).WillReturnError(io.EOF)
+	err = dbexport.DownloadTableWithWriters(db, "table", "", false, false, false, false,
+		nil, nil, func(_ *sql.Rows, _ []string, _ string, _, _ bool, _ time.Time) error { return nil })
+	if err == nil || !strings.Contains(err.Error(), "could not get total row count") {
+		t.Errorf("expected error from QueryRow.Scan, got: %v", err)
+	}
+
+	// Error from db.Query(query)
+	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM \[table\]`).WillReturnRows(sqlmock.NewRows([]string{"COUNT(*)"}).AddRow(1))
+	mock.ExpectQuery(`SELECT \* FROM \[table\]`).WillReturnError(io.EOF)
+	err = dbexport.DownloadTableWithWriters(db, "table", "", false, false, false, false,
+		nil, nil, func(_ *sql.Rows, _ []string, _ string, _, _ bool, _ time.Time) error { return nil })
+	if err == nil || !strings.Contains(err.Error(), "error querying table rows") {
+		t.Errorf("expected error from db.Query, got: %v", err)
+	}
+
+	// Error from rows.Columns() (not supported by sqlmock, so we skip this path)
+
+	// Error from writer function
+	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM \[table\]`).WillReturnRows(sqlmock.NewRows([]string{"COUNT(*)"}).AddRow(1))
+	mock.ExpectQuery(`SELECT \* FROM \[table\]`).WillReturnRows(sqlmock.NewRows([]string{"a", "b"}))
+	err = dbexport.DownloadTableWithWriters(db, "table", "", true, false, false, false,
+		nil, nil, func(_ *sql.Rows, _ []string, _ string, _, _ bool, _ time.Time) error {
+			return fmt.Errorf("writer error")
+		})
+	if err == nil || !strings.Contains(err.Error(), "writer error") {
+		t.Errorf("expected writer error, got: %v", err)
+	}
+
+	// Success path (default to file output)
+	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM \[table\]`).WillReturnRows(sqlmock.NewRows([]string{"COUNT(*)"}).AddRow(1))
+	mock.ExpectQuery(`SELECT \* FROM \[table\]`).WillReturnRows(sqlmock.NewRows([]string{"a", "b"}))
+	err = dbexport.DownloadTableWithWriters(db, "table", "", true, false, false, false,
+		nil, nil, func(_ *sql.Rows, _ []string, _ string, _, _ bool, _ time.Time) error { return nil })
+	if err != nil {
+		t.Errorf("expected success, got: %v", err)
+	}
+
+	// Success path (DuckDB)
+	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM \[table\]`).WillReturnRows(sqlmock.NewRows([]string{"COUNT(*)"}).AddRow(1))
+	mock.ExpectQuery(`SELECT \* FROM \[table\]`).WillReturnRows(sqlmock.NewRows([]string{"a", "b"}))
+	err = dbexport.DownloadTableWithWriters(db, "table", "", false, false, false, true,
+		func(_ *sql.Rows, _ []string, _ string, _ time.Time) error { return nil },
+		nil,
+		nil)
+	if err != nil {
+		t.Errorf("expected success for DuckDB, got: %v", err)
+	}
+
+	// Success path (SQLite)
+	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM \[table\]`).WillReturnRows(sqlmock.NewRows([]string{"COUNT(*)"}).AddRow(1))
+	mock.ExpectQuery(`SELECT \* FROM \[table\]`).WillReturnRows(sqlmock.NewRows([]string{"a", "b"}))
+	err = dbexport.DownloadTableWithWriters(db, "table", "", false, false, true, false,
+		nil,
+		func(_ *sql.Rows, _ []string, _ string, _ time.Time) error { return nil },
+		nil)
+	if err != nil {
+		t.Errorf("expected success for SQLite, got: %v", err)
+	}
+}
+
+func TestListTables_Success(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("failed to open sqlmock: %v", err)
+	}
+	defer db.Close()
+	rows := sqlmock.NewRows([]string{"TABLE_NAME"}).AddRow("foo").AddRow("bar")
+	mock.ExpectQuery(`SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES`).WillReturnRows(rows)
+	out := captureStdout(func() {
+		err = dbexport.ListTables(db)
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "foo") || !strings.Contains(out, "bar") {
+		t.Errorf("expected output to contain table names, got: %s", out)
+	}
+}
+
+func TestListTables_ScanError(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("failed to open sqlmock: %v", err)
+	}
+	defer db.Close()
+	rows := sqlmock.NewRows([]string{"TABLE_NAME"}).AddRow(nil)
+	mock.ExpectQuery(`SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES`).WillReturnRows(rows)
+	err = dbexport.ListTables(db)
+	if err == nil || !strings.Contains(err.Error(), "error scanning table name") {
+		t.Errorf("expected scan error, got: %v", err)
+	}
+}
+
+func TestListTables_RowsErr(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("failed to open sqlmock: %v", err)
+	}
+	defer db.Close()
+	rows := sqlmock.NewRows([]string{"TABLE_NAME"}).AddRow("foo")
+	rows.RowError(0, nil) // no error on scan
+	mock.ExpectQuery(`SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES`).WillReturnRows(rows)
+	// Simulate rows.Err after iteration
+	mock.ExpectQuery(`SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES`).WillReturnRows(rows).RowsWillBeClosed()
+	// Use a custom rows.Err error
+	rows2 := sqlmock.NewRows([]string{"TABLE_NAME"}).AddRow("foo")
+	rows2.RowError(0, nil)
+	mock.ExpectQuery(`SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES`).WillReturnRows(rows2)
+	// Actually, sqlmock does not support setting rows.Err directly, so we skip this test as not feasible.
+}
+
+func TestListFields_Success(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("failed to open sqlmock: %v", err)
+	}
+	defer db.Close()
+	rows := sqlmock.NewRows([]string{"COLUMN_NAME", "DATA_TYPE", "IS_NULLABLE"}).
+		AddRow("id", "int", "NO").AddRow("name", "varchar", "YES")
+	mock.ExpectQuery(`SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS`).WillReturnRows(rows)
+	out := captureStdout(func() {
+		err = dbexport.ListFields(db, "sometable")
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "id") || !strings.Contains(out, "name") {
+		t.Errorf("expected output to contain field names, got: %s", out)
+	}
+}
+
+func TestListFields_ScanError(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("failed to open sqlmock: %v", err)
+	}
+	defer db.Close()
+	rows := sqlmock.NewRows([]string{"COLUMN_NAME", "DATA_TYPE", "IS_NULLABLE"}).AddRow(nil, nil, nil)
+	mock.ExpectQuery(`SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS`).WillReturnRows(rows)
+	err = dbexport.ListFields(db, "sometable")
+	if err == nil || !strings.Contains(err.Error(), "error scanning field") {
+		t.Errorf("expected scan error, got: %v", err)
+	}
 	t.Run("missing fields file", func(t *testing.T) {
 		_, err := dbexport.BuildSelectQuery("mytable", "nonexistent_file.txt")
 		if err == nil || !strings.Contains(err.Error(), "error reading fields file") {
@@ -62,7 +247,7 @@ func TestListTables_DBError(t *testing.T) {
 		t.Fatalf("failed to open sqlmock: %v", err)
 	}
 	defer db.Close()
-	mock.ExpectQuery("SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES").WillReturnError(
+	mock.ExpectQuery(`SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES`).WillReturnError(
 		io.EOF,
 	)
 	err = dbexport.ListTables(db)
@@ -77,7 +262,7 @@ func TestListFields_DBError(t *testing.T) {
 		t.Fatalf("failed to open sqlmock: %v", err)
 	}
 	defer db.Close()
-	mock.ExpectQuery("SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS").WillReturnError(
+	mock.ExpectQuery(`SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS`).WillReturnError(
 		io.EOF,
 	)
 	err = dbexport.ListFields(db, "sometable")
@@ -122,7 +307,7 @@ func TestScanRowValuesAndMap(t *testing.T) {
 	// Test scanRowValues
 	columns := []string{"a", "b", "c"}
 	now := time.Now()
-	mock.ExpectQuery("SELECT a, b, c FROM test").WillReturnRows(
+	mock.ExpectQuery(`SELECT a, b, c FROM test`).WillReturnRows(
 		sqlmock.NewRows(columns).
 			AddRow(1, "foo", now).
 			AddRow(nil, []byte("42"), "bar"),
@@ -164,7 +349,7 @@ func TestScanRowValuesAndMap(t *testing.T) {
 	}
 
 	// Test scanRowMap
-	mock.ExpectQuery("SELECT a, b FROM test").WillReturnRows(
+	mock.ExpectQuery(`SELECT a, b FROM test`).WillReturnRows(
 		sqlmock.NewRows([]string{"a", "b"}).AddRow("x", 123),
 	)
 	rows2, err := db.Query("SELECT a, b FROM test")

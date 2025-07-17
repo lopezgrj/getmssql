@@ -8,8 +8,20 @@ import (
 	"time"
 )
 
-// DownloadTable exports a table to the selected format using the appropriate writer.
-func DownloadTable(db *sql.DB, table string, fieldsFile string, asTSV, asCSV, asSQLite, asDuckDB bool) error {
+type DuckDBWriter func(rows *sql.Rows, cols []string, table string, start time.Time) error
+type SQLiteWriter func(rows *sql.Rows, cols []string, table string, start time.Time) error
+type FileWriter func(rows *sql.Rows, cols []string, table string, asTSV, asCSV bool, start time.Time) error
+
+// DownloadTableWithWriters allows dependency injection for writer functions (for testing).
+func DownloadTableWithWriters(
+	db *sql.DB,
+	table string,
+	fieldsFile string,
+	asTSV, asCSV, asSQLite, asDuckDB bool,
+	duckDBWriter DuckDBWriter,
+	sqliteWriter SQLiteWriter,
+	fileWriter FileWriter,
+) error {
 	start := time.Now()
 	query, err := BuildSelectQuery(table, fieldsFile)
 	if err != nil {
@@ -47,16 +59,21 @@ func DownloadTable(db *sql.DB, table string, fieldsFile string, asTSV, asCSV, as
 	var writeErr error
 	switch {
 	case asDuckDB:
-		writeErr = WriteDuckDB(rows, cols, table, start)
+		writeErr = duckDBWriter(rows, cols, table, start)
 	case asSQLite:
-		writeErr = WriteSQLite(rows, cols, table, start)
+		writeErr = sqliteWriter(rows, cols, table, start)
 	default:
-		writeErr = WriteFileOutput(rows, cols, table, asTSV, asCSV, start)
+		writeErr = fileWriter(rows, cols, table, asTSV, asCSV, start)
 	}
 	if writeErr != nil {
 		return writeErr
 	}
 	return nil
+}
+
+// DownloadTable exports a table to the selected format using the default writers.
+func DownloadTable(db *sql.DB, table string, fieldsFile string, asTSV, asCSV, asSQLite, asDuckDB bool) error {
+	return DownloadTableWithWriters(db, table, fieldsFile, asTSV, asCSV, asSQLite, asDuckDB, WriteDuckDB, WriteSQLite, WriteFileOutput)
 }
 
 // BuildSelectQuery builds a SELECT query for the given table and optional fields file.

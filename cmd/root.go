@@ -1,9 +1,10 @@
 package cmd
 
 import (
-	   "fmt"
-	   "os"
-	   "github.com/spf13/cobra"
+	"fmt"
+	"os"
+
+	"github.com/spf13/cobra"
 )
 
 var (
@@ -20,14 +21,13 @@ var rootCmd = &cobra.Command{
 	Long:  `A CLI tool to export MSSQL data to JSON, CSV, TSV, SQLite, or DuckDB formats.`,
 }
 
-
 var exitFunc = os.Exit
 
 func Execute() {
-	   if err := rootCmd.Execute(); err != nil {
-			   fmt.Fprintln(os.Stderr, err)
-			   exitFunc(1)
-	   }
+	if err := rootCmd.Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		exitFunc(1)
+	}
 }
 
 func init() {
